@@ -1,0 +1,15 @@
+services:
+  solitaire:
+    image: ghcr.io/${GITHUB_REPOSITORY_OWNER}/solitaire:latest
+    restart: unless-stopped
+    ports:
+      - "${HOST_PORT:-3000}:80"
+    networks:
+      - proxy
+    labels:
+      caddy: ${SOLITAIRE_DOMAIN}
+      caddy.reverse_proxy: "{{upstreams 80}}"
+
+networks:
+  proxy:
+    external: true
