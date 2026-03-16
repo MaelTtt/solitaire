@@ -1,42 +1,75 @@
-# sv
+# Solitaire
 
-Everything you need to build a Svelte project, powered by [`sv`](https://github.com/sveltejs/cli).
+Un jeu de Solitaire (Klondike) entièrement jouable dans le navigateur, sans dépendances de jeu — animations en CSS/WAAPI et état réactif en Svelte 5.
 
-## Creating a project
+---
 
-If you're seeing this, you've probably already done this step. Congrats!
+![Aperçu du projet](./docs/screenshot.png)
 
-```sh
-# create a new project
-npx sv create my-app
+---
+
+## Stack technique
+
+- **SvelteKit 2** + **Svelte 5** (runes `$state`, `$derived`)
+- **TypeScript** strict
+- **Vite 6**
+- **adapter-static** — rendu purement côté client
+- Animations : `spring()` Svelte + WAAPI + CSS (aucune lib d'animation)
+
+## Fonctionnalités
+
+- Jeu complet de Klondike Solitaire (tirage 1 ou 3 cartes)
+- Glisser-déposer des cartes entre les colonnes et les fondations
+- Annulation illimitée (undo)
+- Système de score
+- Écran de victoire animé
+- Entièrement hors-ligne, aucune donnée envoyée
+
+## Lancer le projet en développement
+
+```bash
+bun install
+bun run dev
 ```
 
-To recreate this project with the same configuration:
+L'application est disponible sur [http://localhost:5173](http://localhost:5173).
 
-```sh
-# recreate this project
-pnpm dlx sv@0.12.5 create --template minimal --types ts --install pnpm .
+## Build de production
+
+```bash
+bun run build
 ```
 
-## Developing
+Les fichiers statiques sont générés dans le dossier `build/`.
 
-Once you've created a project and installed dependencies with `npm install` (or `pnpm install` or `yarn`), start a development server:
+Pour prévisualiser le build :
 
-```sh
-npm run dev
-
-# or start the server and open the app in a new browser tab
-npm run dev -- --open
+```bash
+bun run preview
 ```
 
-## Building
+## Déploiement avec Docker
 
-To create a production version of your app:
-
-```sh
-npm run build
+```bash
+docker build -t solitaire .
+docker run -p 8080:80 solitaire
 ```
 
-You can preview the production build with `npm run preview`.
+Ou via Docker Compose (voir `deploy/compose.yaml`) :
 
-> To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.
+```bash
+docker compose -f deploy/compose.yaml up
+```
+
+## Structure du projet
+
+```
+src/
+├── lib/
+│   ├── components/   # Card, TableauPile, FoundationPile, StockPile, WastePile...
+│   ├── game/         # Types, deck, règles, hints, score
+│   ├── stores/       # gameStore.svelte.ts — état global ($state runes)
+│   └── utils/        # dragState.svelte.ts — contexte de drag global
+└── routes/
+    └── +page.svelte  # Layout du plateau + orchestration du drag
+```

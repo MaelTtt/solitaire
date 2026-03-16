@@ -30,8 +30,8 @@
 		position: absolute;
 		width: var(--card-w, 80px);
 		height: var(--card-h, 112px);
-		border-radius: var(--card-radius, 4px);
-		background-color: white;
+		clip-path: inset(0 round var(--card-radius, 6px));
 		box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+		image-rendering: pixelated;
 	}
 </style>

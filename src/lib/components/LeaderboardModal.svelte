@@ -1,8 +1,11 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { leaderboard, fmtTime } from '$lib/stores/leaderboardStore.svelte';
 
 	interface Props { onclose: () => void; }
 	let { onclose }: Props = $props();
+
+	onMount(() => { leaderboard.refresh(); });
 
 	function fmtDate(iso: string) {
 		return new Date(iso + 'T00:00:00Z').toLocaleDateString(undefined, { month: 'short', day: 'numeric' });

@@ -18,9 +18,10 @@
 	let name = $state('');
 	let submitted = $state(false);
 
-	function submit() {
+	async function submit() {
 		if (!name.trim()) return;
-		leaderboard.submit({
+		submitted = true; // optimistic — show leaderboard immediately
+		await leaderboard.submit({
 			name: name.trim(),
 			score: finalScore,
 			moves,
@@ -29,7 +30,6 @@
 			mode,
 			seed
 		});
-		submitted = true;
 	}
 
 	const board = $derived(mode === 'daily' ? leaderboard.daily : leaderboard.allTime);

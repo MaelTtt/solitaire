@@ -10,6 +10,20 @@ import { getHint, hasAnyMove } from '$lib/game/hints';
 import type { Hint } from '$lib/game/hints';
 
 const MAX_UNDO = 100;
+const SAVE_KEY = 'solitaire_game_v1';
+
+function saveGame() {
+	if (typeof localStorage === 'undefined') return;
+	try {
+		// JSON.stringify traverses Svelte 5 Proxy via property enumeration — no need for $state.snapshot here
+		localStorage.setItem(SAVE_KEY, JSON.stringify({
+			state: _state,
+			won: _won,
+			stuck: _stuck,
+			saveTime: Date.now(),
+		}));
+	} catch {}
+}
 
 function dealState(drawMode: 1 | 3 = 1, mode: GameMode = 'random', seed = ''): GameState {
 	const raw = createDeck();
@@ -86,6 +100,7 @@ export const gameStore = {
 		_autoCompleting = false;
 		_stuck = false;
 		_placesSinceRecycle = 0;
+		saveGame();
 	},
 
 	drawFromStock() {
@@ -114,6 +129,7 @@ export const gameStore = {
 			this._startAutoComplete();
 		}
 		checkStuck();
+		saveGame();
 	},
 
 	moveCards(from: PileLocation, to: PileLocation, startCardId?: string) {
@@ -164,6 +180,7 @@ export const gameStore = {
 			this._startAutoComplete();
 		}
 		if (!_won && !_autoCompleting) checkStuck();
+		saveGame();
 		return true;
 	},
 
@@ -195,6 +212,36 @@ export const gameStore = {
 		_stuck = false;
 		_autoCompleting = false;
 		_placesSinceRecycle = 1; // prevent false stuck after undo
+		saveGame();
+	},
+
+	hasSaved(): boolean {
+		try { return !!localStorage.getItem(SAVE_KEY); } catch { return false; }
+	},
+
+	loadSaved(): boolean {
+		try {
+			const raw = localStorage.getItem(SAVE_KEY);
+			if (!raw) return false;
+			const data = JSON.parse(raw);
+			if (!data?.state) return false;
+			const state = data.state as GameState;
+			// Adjust startTime to exclude offline time so the timer stays accurate
+			const offlineMs = Date.now() - (data.saveTime ?? Date.now());
+			if (!data.won) state.startTime = state.startTime + offlineMs;
+			_state = state;
+			_won = data.won ?? false;
+			_stuck = data.stuck ?? false;
+			_undoStack = [];
+			_hint = null;
+			_autoCompleting = false;
+			_placesSinceRecycle = 1;
+			return true;
+		} catch { return false; }
+	},
+
+	clearSaved() {
+		try { localStorage.removeItem(SAVE_KEY); } catch {}
 	},
 
 	setDrawMode(mode: 1 | 3) {
@@ -288,6 +335,7 @@ export const gameStore = {
 			_state.endTime = Date.now();
 			_won = true;
 			_autoCompleting = false;
+			saveGame();
 			return;
 		}
 		if (moved) {

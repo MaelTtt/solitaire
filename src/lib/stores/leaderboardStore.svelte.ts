@@ -1,4 +1,5 @@
-const KEY = 'solitaire_lb_v1';
+const LOCAL_KEY = 'solitaire_lb_v1';
+const API_URL = '/api/leaderboard';
 
 export interface LeaderboardEntry {
 	name: string;
@@ -10,16 +11,35 @@ export interface LeaderboardEntry {
 	seed: string;
 }
 
-function load(): LeaderboardEntry[] {
+function loadLocal(): LeaderboardEntry[] {
 	if (typeof window === 'undefined') return [];
-	try { return JSON.parse(localStorage.getItem(KEY) ?? '[]'); }
+	try { return JSON.parse(localStorage.getItem(LOCAL_KEY) ?? '[]'); }
 	catch { return []; }
 }
 
-let _entries = $state<LeaderboardEntry[]>(load());
+async function fetchFromAPI(): Promise<LeaderboardEntry[]> {
+	try {
+		const res = await fetch(API_URL, { cache: 'no-store' });
+		if (!res.ok) return [];
+		return await res.json();
+	} catch { return []; }
+}
+
+let _entries = $state<LeaderboardEntry[]>(loadLocal());
+let _loading = $state(false);
+
+// Load from API on startup
+if (typeof window !== 'undefined') {
+	_loading = true;
+	fetchFromAPI().then((remote) => {
+		if (remote.length > 0) _entries = remote;
+		_loading = false;
+	}).catch(() => { _loading = false; });
+}
 
 export const leaderboard = {
 	get entries() { return _entries; },
+	get loading() { return _loading; },
 
 	get daily(): LeaderboardEntry[] {
 		const today = todayDate();
@@ -33,12 +53,35 @@ export const leaderboard = {
 		return [..._entries].sort((a, b) => b.score - a.score).slice(0, 10);
 	},
 
-	submit(entry: LeaderboardEntry) {
+	async submit(entry: LeaderboardEntry): Promise<void> {
+		// Optimistic local update so the UI reflects the score immediately
 		_entries = [entry, ..._entries];
+
+		try {
+			const res = await fetch(API_URL, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify(entry),
+			});
+			if (res.ok) {
+				// Refresh from API to get the full shared leaderboard
+				const remote = await fetchFromAPI();
+				if (remote.length > 0) _entries = remote;
+				return;
+			}
+		} catch { /* fall through to localStorage */ }
+
+		// Fallback: persist locally if API unreachable
 		if (typeof window !== 'undefined') {
-			localStorage.setItem(KEY, JSON.stringify(_entries));
+			localStorage.setItem(LOCAL_KEY, JSON.stringify(_entries));
 		}
-	}
+	},
+
+	/** Re-fetch from API (e.g. when leaderboard modal opens) */
+	async refresh(): Promise<void> {
+		const remote = await fetchFromAPI();
+		if (remote.length > 0) _entries = remote;
+	},
 };
 
 export function todayDate(): string {

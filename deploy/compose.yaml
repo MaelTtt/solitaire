@@ -1,15 +1,22 @@
 services:
   solitaire:
-    image: ghcr.io/${GITHUB_REPOSITORY_OWNER}/solitaire:latest
+    image: ghcr.io/maelttt/solitaire:latest
     restart: unless-stopped
     ports:
-      - "${HOST_PORT:-3000}:80"
+      - "${HOST_PORT:-3000}:3000"
+    volumes:
+      - leaderboard_data:/data
     networks:
       - proxy
     labels:
-      caddy: ${SOLITAIRE_DOMAIN}
-      caddy.reverse_proxy: "{{upstreams 80}}"
+      caddy: ${SOLITAIRE_DOMAIN:-solitaire.maelttt.dev}
+      caddy.reverse_proxy: "{{upstreams 3000}}"
+    environment:
+      DATA_DIR: /data
 
 networks:
   proxy:
     external: true
+
+volumes:
+  leaderboard_data:

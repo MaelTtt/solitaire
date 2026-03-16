@@ -1,24 +1,23 @@
 <script lang="ts">
 	const VERT = `attribute vec2 p;void main(){gl_Position=vec4(p,0,1);}`;
 
-	const FRAG = `precision mediump float;
+	const FRAG = `precision highp float;
 uniform vec2 R;uniform float T;
 #define C1 vec4(0.32,0.70,0.63,1)
 #define C2 vec4(0.17,0.53,0.47,1)
-#define C3 vec4(0.07,0.24,0.21,1)
+#define C3 vec4(0.13,0.33,0.28,1)
 #define SA 0.35
 #define PF 745.0
 #define CT 1.8
 #define LG 0.06
 void main(){
   float ps=length(R)/PF;
-  vec2 uv=(floor(gl_FragCoord.xy*(1./ps))*ps-0.5*R)/length(R);
+  vec2 uv=(floor(gl_FragCoord.xy*(1./ps))*ps-0.5*R)/R;
   float ul=length(uv);
-  float spd=-2.0*0.2+302.2;
+  float spd=-2.0*0.2+302.2+T*0.06;
   float ang=atan(uv.y,uv.x)+spd-3.0*(SA*ul+(1.-SA));
-  vec2 mid=(R/length(R))*0.5;
-  uv=vec2(ul*cos(ang)+mid.x,ul*sin(ang)+mid.y)-mid;
-  uv*=18.;
+  uv=vec2(ul*cos(ang),ul*sin(ang));
+  uv*=13.;
   float t=T*3.;
   vec2 uv2=vec2(uv.x+uv.y);
   for(int i=0;i<5;i++){
@@ -27,7 +26,7 @@ void main(){
     uv-=cos(uv.x+uv.y)-sin(uv.x*0.711-uv.y);
   }
   float cm=0.25*CT+0.5*SA+1.2;
-  float pr=min(2.,max(0.,length(uv)*0.035*cm));
+  float pr=min(2.,max(0.,length(uv)*0.020*cm));
   float c1=max(0.,1.-cm*abs(1.-pr));
   float c2=max(0.,1.-cm*abs(pr));
   float c3=1.-min(1.,c1+c2);
@@ -67,9 +66,10 @@ void main(){
 		const uT = gl.getUniformLocation(prog, 'T');
 
 		function resize() {
-			cv.width = window.innerWidth;
-			cv.height = window.innerHeight;
-			gl.viewport(0, 0, cv.width, cv.height);
+			const dpr = window.devicePixelRatio || 1;
+			cv.width = window.innerWidth * dpr;
+			cv.height = window.innerHeight * dpr;
+			gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
 		}
 		resize();
 		window.addEventListener('resize', resize, { passive: true });
@@ -77,7 +77,7 @@ void main(){
 		let raf: number;
 		const t0 = performance.now();
 		(function frame() {
-			gl.uniform2f(uR, cv.width, cv.height);
+			gl.uniform2f(uR, gl.drawingBufferWidth, gl.drawingBufferHeight);
 			gl.uniform1f(uT, (performance.now() - t0) / 1000);
 			gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 			raf = requestAnimationFrame(frame);
@@ -87,4 +87,4 @@ void main(){
 	}
 </script>
 
-<canvas use:balatro style="position:fixed;inset:0;width:100vw;height:100vh;z-index:0;display:block"></canvas>
+<canvas use:balatro style="position:fixed;inset:0;z-index:0;display:block;width:100%;height:100%"></canvas>

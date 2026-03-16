@@ -5,7 +5,7 @@
 <svelte:head>
 	<title>Solitaire</title>
 	<meta name="description" content="Klondike Solitaire" />
-	<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+	<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 </svelte:head>
 
 {@render children()}
