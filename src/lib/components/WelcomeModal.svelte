@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { todaySeed } from '$lib/game/seedRng';
-	import { leaderboard, todayDate, fmtTime } from '$lib/stores/leaderboardStore.svelte';
+	import { leaderboard, todayDate, fmtTime, seedLabel } from '$lib/stores/leaderboardStore.svelte';
 
 	interface Props {
 		onstart: (mode: 'daily' | 'random', seed: string) => void;
@@ -34,7 +34,7 @@
 				{/if}
 			</button>
 
-			<button class="mode-btn random" onclick={() => onstart('random', '')}>
+			<button class="mode-btn random" onclick={() => onstart('random', `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`)}>
 				<span class="mode-icon">🎲</span>
 				<span class="mode-title">Partie aléatoire</span>
 				<span class="mode-desc">Nouveau mélange à chaque partie</span>
@@ -67,7 +67,7 @@
 							{#each leaderboard.allTime.slice(0, 5) as e, i}
 								<div class="lb-row">
 									<span class="lb-rank">#{i + 1}</span>
-									<span class="lb-name">{e.name}</span>
+									<span class="lb-name">{e.name}<span class="lb-meta">{seedLabel(e)}</span></span>
 									<span class="lb-score">{e.score}</span>
 									<span class="lb-time">{fmtDate(e.date)}</span>
 								</div>
@@ -173,6 +173,8 @@
 	.lb-row { display: flex; gap: 6px; align-items: center; font-size: 12px; padding: 3px 0; border-bottom: 1px solid rgba(255,255,255,0.08); }
 	.lb-rank { color: rgba(255,255,255,0.35); width: 22px; }
 	.lb-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.lb-name { display: flex; flex-direction: column; gap: 1px; white-space: normal; }
+	.lb-meta { font-size: 10px; color: rgba(255,255,255,0.38); }
 	.lb-score { font-variant-numeric: tabular-nums; color: #3ac961; }
 	.lb-time { color: rgba(255,255,255,0.35); font-size: 11px; }
 

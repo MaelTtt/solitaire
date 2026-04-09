@@ -16,6 +16,10 @@
 		src: url('https://files.catbox.moe/cdr5ds.ttf');
 		font-display: swap;
 	}
+	:global(html, body, #svelte) {
+		width: 100%;
+		min-height: 100%;
+	}
 	:global(*, *::before, *::after) {
 		box-sizing: border-box;
 		margin: 0;

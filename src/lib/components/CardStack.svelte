@@ -9,11 +9,11 @@
 	let { cards, tilt = 0 }: Props = $props();
 </script>
 
-<div class="stack" style="--drag-tilt:{tilt}deg; --stack-count:{cards.length}">
+<div class="stack" style="--drag-tilt:{tilt}deg; --stack-count:{cards.length}; --stack-offset:var(--face-up-offset, 22px)">
 	{#each cards as card, i}
 		<div
 			class="ghost-card"
-			style="top:{i * 22}px; z-index:{i}; {spriteStyle(card.suit, card.rank)}"
+			style="top:calc({i} * var(--stack-offset)); z-index:{i}; {spriteStyle(card.suit, card.rank)}"
 		></div>
 	{/each}
 </div>
@@ -22,7 +22,7 @@
 	.stack {
 		position: relative;
 		width: var(--card-w, 80px);
-		height: calc(var(--card-h, 112px) + (var(--stack-count, 1) - 1) * 22px);
+		height: calc(var(--card-h, 112px) + (var(--stack-count, 1) - 1) * var(--stack-offset));
 		transform: rotate(var(--drag-tilt));
 		pointer-events: none;
 	}

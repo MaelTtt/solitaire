@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { leaderboard, fmtTime } from '$lib/stores/leaderboardStore.svelte';
+	import { leaderboard, fmtTime, seedLabel } from '$lib/stores/leaderboardStore.svelte';
 
 	interface Props { onclose: () => void; }
 	let { onclose }: Props = $props();
@@ -11,12 +11,18 @@
 		return new Date(iso + 'T00:00:00Z').toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 	}
 
+	function playSeed(seed: string) {
+		window.dispatchEvent(new CustomEvent('play-seed', { detail: seed }));
+		onclose();
+	}
+
 	function onOverlayClick(e: MouseEvent) {
 		if (e.target === e.currentTarget) onclose();
 	}
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
+<!-- svelte-ignore a11y_click_events_have_key_events -->
 <div class="overlay" onclick={onOverlayClick}>
 	<div class="panel">
 		<div class="panel-header">
@@ -51,9 +57,14 @@
 					{#each leaderboard.allTime as e, i}
 						<div class="lb-row" class:gold={i===0} class:silver={i===1} class:bronze={i===2}>
 							<span class="lb-rank">#{i + 1}</span>
-							<span class="lb-name">{e.name}</span>
+							<span class="lb-name">{e.name}<span class="lb-meta">{seedLabel(e)}</span></span>
 							<span class="lb-score">{e.score}pts</span>
-							<span class="lb-time">{fmtDate(e.date)}</span>
+							<div class="lb-side">
+								<span class="lb-time">{fmtDate(e.date)}</span>
+								{#if e.mode === 'random'}
+									<button class="seed-btn" onclick={() => playSeed(e.seed)}>Jouer</button>
+								{/if}
+							</div>
 						</div>
 					{/each}
 				{/if}
@@ -145,8 +156,26 @@
 	.lb-row.bronze { background: rgba(180,100,50,0.08); }
 	.lb-rank { color: rgba(255,255,255,0.35); width: 24px; font-size: 11px; }
 	.lb-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.lb-name {
+		display: flex;
+		flex-direction: column;
+		gap: 1px;
+		white-space: normal;
+	}
+	.lb-meta { font-size: 10px; color: rgba(255,255,255,0.38); }
 	.lb-score { font-variant-numeric: tabular-nums; color: #3ac961; font-weight: 700; white-space: nowrap; }
 	.lb-time { color: rgba(255,255,255,0.35); font-size: 11px; white-space: nowrap; }
+	.lb-side { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+	.seed-btn {
+		background: rgba(0,157,255,0.25);
+		border: 1px solid rgba(255,255,255,0.25);
+		border-radius: 4px;
+		color: white;
+		font: inherit;
+		font-size: 10px;
+		padding: 2px 6px;
+		cursor: pointer;
+	}
 
 	@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
 	@keyframes pop-in { from { transform: scale(0.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }

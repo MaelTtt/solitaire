@@ -42,6 +42,7 @@
 		{@const card = cards[cards.length - 1]}
 		<CardComponent
 			{card}
+			dragging={dragState.active && dragState.cards[0]?.id === card.id && dragState.from?.type === 'foundation' && dragState.from.index === index}
 			onpointerdown={(e) => handlePointerDown(e, card)}
 			ondblclick={() => handleDblClick(card)}
 		/>

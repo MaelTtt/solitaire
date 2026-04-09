@@ -8,6 +8,7 @@ let _colGap = $state(8);
 let _faceUpOffset = $state(28);
 let _faceDownOffset = $state(18);
 let _wasteOffset = $state(18);
+let _tableauScale = $state(1);
 
 function compute() {
 	if (typeof window === 'undefined') return;
@@ -31,15 +32,21 @@ function compute() {
 	_cardW = w;
 	_cardH = h;
 	_colGap = gap;
-	_faceUpOffset = Math.max(12, Math.floor(h * 0.24));
+	const availableBoardHeight = vh - 2 * pad - gap - h;
+	const relaxedOffset = Math.max(12, Math.floor(h * 0.24));
+	const maxTableauOffset = Math.floor(Math.max(availableBoardHeight - h, h * 0.45) / 18);
+	_faceUpOffset = Math.max(10, Math.min(relaxedOffset, maxTableauOffset));
 	_faceDownOffset = Math.max(7, Math.floor(h * 0.15));
 	_wasteOffset = Math.max(9, Math.floor(w * 0.22));
+	_tableauScale = _faceUpOffset / relaxedOffset;
 
 	const r = document.documentElement;
 	r.style.setProperty('--card-w', w + 'px');
 	r.style.setProperty('--card-h', h + 'px');
 	r.style.setProperty('--col-gap', gap + 'px');
 	r.style.setProperty('--board-pad', pad + 'px');
+	r.style.setProperty('--face-up-offset', _faceUpOffset + 'px');
+	r.style.setProperty('--tableau-scale', String(_tableauScale));
 }
 
 // Re-run on every HMR save
@@ -52,6 +59,7 @@ export const screen = {
 	get faceUpOffset() { return _faceUpOffset; },
 	get faceDownOffset() { return _faceDownOffset; },
 	get wasteOffset() { return _wasteOffset; },
+	get tableauScale() { return _tableauScale; },
 
 	init() {
 		compute();

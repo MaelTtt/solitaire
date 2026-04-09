@@ -38,6 +38,12 @@
 		// Handle fullscreen change events
 		document.addEventListener('fullscreenchange', () => { isFullscreen = !!document.fullscreenElement; });
 		document.addEventListener('webkitfullscreenchange', () => { isFullscreen = !!(document as any).webkitFullscreenElement; });
+		const playSeed = (event: Event) => {
+			const seed = (event as CustomEvent<string>).detail;
+			if (seed) startGame('random', seed);
+		};
+		window.addEventListener('play-seed', playSeed as EventListener);
+		return () => window.removeEventListener('play-seed', playSeed as EventListener);
 	});
 
 	const gs = gameStore;
@@ -68,7 +74,7 @@
 	}
 
 	function onNewGame(mode: 'daily' | 'random') {
-		gs.newGame(gs.state.drawMode, mode, mode === 'daily' ? todaySeed() : '');
+		gs.newGame(gs.state.drawMode, mode, mode === 'daily' ? todaySeed() : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`);
 	}
 
 	let dropTarget = $state<PileLocation | null>(null);
@@ -104,7 +110,7 @@
 	function onKeydown(e: KeyboardEvent) {
 		if (e.key === 'n' || e.key === 'N') showModal = true;
 		if ((e.ctrlKey || e.metaKey) && e.key === 'z') gs.undo();
-		if (e.key === 'h' || e.key === 'H') gs.showHint();
+		if ((e.key === 'h' || e.key === 'H') && !e.repeat) gs.showHint();
 	}
 
 	const hintedCardId = $derived(gs.hint?.cardId ?? null);
@@ -195,7 +201,7 @@
 					<path d="M3 2h12v1H3V2zm1 1h10v6c0 2.5-2 4-5 4S4 11.5 4 9V3zm-2 1H1v3c0 1.5 1 2.5 2.5 2.8V4zm13 0h-1v5.8C16.5 9.5 17 8.5 17 7V4h-1zM7.5 13V14H6v1h1v1h4v-1h1v-1H10v-1H7.5zM6 16h6v1H6v-1z"/>
 				</svg>
 			</button>
-			<button class="act-btn hint-btn" title="Indice (H)" onclick={() => gs.showHint()}>
+			<button class="act-btn hint-btn" title="Indice (H)" onclick={() => gs.showHint()} disabled={gs.autoCompleting}>
 				<!-- Lightbulb -->
 				<svg viewBox="0 0 18 18" fill="currentColor" width="18" height="18">
 					<path d="M9 1C6.2 1 4 3.2 4 6c0 2.3 1.4 4.2 3.5 5V13h3v-2c2.1-.8 3.5-2.7 3.5-5 0-2.8-2.2-5-5-5zM7 15h4v1H7v-1zm1 2h2v1H8v-1z"/>
@@ -216,7 +222,7 @@
 
 	<!-- ─── BOARD ───────────────────────────────── -->
 	<div class="board-wrap">
-		<main class="board">
+		<main class="board" style="--tableau-scale:{screen.tableauScale}">
 			<section class="top-row">
 				<StockPile cards={gs.state.stock} hinted={hintStock} />
 				<WastePile cards={gs.state.waste} drawMode={gs.state.drawMode} hintedCardId={hintedCardId} />
@@ -543,6 +549,10 @@
 	.gap        { flex: 1; }
 	.tableau-row { display: flex; align-items: flex-start; gap: var(--col-gap, 8px); }
 	.tableau-col { flex: 1; min-width: 0; }
+	.tableau-row {
+		transform: scale(var(--tableau-scale, 1));
+		transform-origin: top center;
+	}
 
 	.drag-ghost {
 		position: fixed;

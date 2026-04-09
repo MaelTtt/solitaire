@@ -1,6 +1,4 @@
 import type { GameState, GameMode, PileLocation, Card } from '$lib/game/types';
-import { createDeck, shuffle } from '$lib/game/deck';
-import { seededShuffle } from '$lib/game/seedRng';
 import { canMoveToFoundation, canMoveToTableau, isWon, findFoundationIndex, hasNoFaceDownCards } from '$lib/game/rules';
 import {
 	SCORE_FOUNDATION, SCORE_FLIP, SCORE_TABLEAU,
@@ -8,6 +6,7 @@ import {
 } from '$lib/game/score';
 import { getHint, hasAnyMove } from '$lib/game/hints';
 import type { Hint } from '$lib/game/hints';
+import { dealSolvableState } from '$lib/game/solver';
 
 const MAX_UNDO = 100;
 const SAVE_KEY = 'solitaire_game_v1';
@@ -26,32 +25,11 @@ function saveGame() {
 }
 
 function dealState(drawMode: 1 | 3 = 1, mode: GameMode = 'random', seed = ''): GameState {
-	const raw = createDeck();
-	const deck = seed ? seededShuffle(raw, seed) : shuffle(raw);
-	const tableau: GameState['tableau'] = [[], [], [], [], [], [], []];
-	let idx = 0;
-	for (let col = 0; col < 7; col++) {
-		for (let row = 0; row <= col; row++) {
-			const card = { ...deck[idx++] };
-			card.faceUp = row === col;
-			tableau[col].push(card);
-		}
+	if (seed) {
+		return dealSolvableState(drawMode, mode, seed);
 	}
-	return {
-		stock: deck.slice(idx).map((c) => ({ ...c, faceUp: false })),
-		waste: [],
-		foundations: [[], [], [], []],
-		tableau,
-		score: 0,
-		drawMode,
-		moves: 0,
-		startTime: Date.now(),
-		endTime: null,
-		hintsUsed: 0,
-		recycleCount: 0,
-		mode,
-		seed
-	};
+	const randomSeed = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+	return dealSolvableState(drawMode, mode, randomSeed);
 }
 
 // ─── Reactive state ───────────────────────────────────────────────
@@ -195,9 +173,9 @@ export const gameStore = {
 	},
 
 	showHint() {
+		if (_hintTimer) clearTimeout(_hintTimer);
 		_state.hintsUsed++;
 		_hint = getHint(_state);
-		if (_hintTimer) clearTimeout(_hintTimer);
 		_hintTimer = setTimeout(() => { _hint = null; }, 2000);
 	},
 

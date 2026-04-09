@@ -93,6 +93,7 @@
 		flex-shrink: 0;
 		will-change: transform;
 		image-rendering: pixelated;
+		transform-origin: center center;
 	}
 	.card.face-down {
 		cursor: default;
@@ -102,6 +103,7 @@
 	}
 	.card.dragging {
 		cursor: grabbing;
+		pointer-events: none;
 	}
 
 	.shine {

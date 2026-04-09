@@ -11,6 +11,11 @@ export interface LeaderboardEntry {
 	seed: string;
 }
 
+export function seedLabel(entry: Pick<LeaderboardEntry, 'mode' | 'date' | 'seed'>): string {
+	if (entry.mode === 'daily') return `Quotidien · ${entry.date}`;
+	return `Aléatoire · graine ${entry.seed}`;
+}
+
 function loadLocal(): LeaderboardEntry[] {
 	if (typeof window === 'undefined') return [];
 	try { return JSON.parse(localStorage.getItem(LOCAL_KEY) ?? '[]'); }
