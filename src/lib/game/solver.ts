@@ -35,6 +35,11 @@ const MAX_DEPTH = 110;
 const MAX_VISITED_STATES = 4500;
 
 export function dealSolvableState(drawMode: 1 | 3 = 1, mode: GameMode = 'random', seed = ''): GameState {
+	// Daily mode: use constructive layout — guaranteed winnable by design, no solver needed.
+	if (mode === 'daily') {
+		return dealDailyGuaranteed(drawMode, seed || randomSeed());
+	}
+
 	const raw = createDeck();
 	const baseSeed = seed || randomSeed();
 	let bestState: GameState | null = null;
@@ -42,7 +47,7 @@ export function dealSolvableState(drawMode: 1 | 3 = 1, mode: GameMode = 'random'
 	for (let attempt = 0; attempt < MAX_CANDIDATE_ATTEMPTS; attempt++) {
 		const attemptSeed = `${baseSeed}#${attempt}`;
 		const deck = seededShuffle(raw, attemptSeed);
-		const state = dealFromDeck(deck, drawMode, mode, seed || attemptSeed);
+		const state = dealFromDeck(deck, drawMode, mode, attemptSeed);
 		const result = solveKlondike(state);
 		if (
 			!bestResult ||
@@ -58,7 +63,7 @@ export function dealSolvableState(drawMode: 1 | 3 = 1, mode: GameMode = 'random'
 	}
 	if (bestState) return bestState;
 	const fallbackDeck = seededShuffle(raw, `${baseSeed}#0`);
-	return dealFromDeck(fallbackDeck, drawMode, mode, seed || `${baseSeed}#0`);
+	return dealFromDeck(fallbackDeck, drawMode, mode, `${baseSeed}#0`);
 }
 
 export function solveKlondike(initial: GameState): SolvabilityResult {
@@ -327,4 +332,73 @@ function takeCards(state: SearchState, loc: PileLocation, cardId?: string): Card
 		return index >= 0 ? pile.splice(index) : [];
 	}
 	return [];
+}
+
+// ─── Guaranteed-solvable daily deal ──────────────────────────────────────────
+//
+// Constructive layout — no solver needed:
+//   - Stock: A→Q of all 4 suits in seeded-permuted round-robin order (48 cards).
+//     Cycling stock always delivers Aces first, then 2s, etc. → all go to foundation.
+//   - Tableau cols 0-3: one face-up King each (seeded suit assignment).
+//   - Tableau cols 4-6: empty.
+//
+// Win sequence: cycle stock → every card goes to foundation; Kings move to empty
+// cols as needed, then to foundation last. Guaranteed 0 recycles needed. ✓
+//
+function dealDailyGuaranteed(drawMode: 1 | 3, seed: string): GameState {
+	// Seeded RNG
+	let h = 2166136261;
+	for (let i = 0; i < seed.length; i++) {
+		h ^= seed.charCodeAt(i);
+		h = Math.imul(h, 16777619);
+	}
+	h = h >>> 0;
+	const rngState = { s: h };
+	function rng() {
+		rngState.s |= 0;
+		rngState.s = (rngState.s + 0x6d2b79f5) | 0;
+		let t = Math.imul(rngState.s ^ (rngState.s >>> 15), 1 | rngState.s);
+		t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+		return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+	}
+	function pick(n: number) { return Math.floor(rng() * n); }
+
+	const suits: Card['suit'][] = ['spades', 'hearts', 'diamonds', 'clubs'];
+	for (let i = suits.length - 1; i > 0; i--) {
+		const j = pick(i + 1);
+		[suits[i], suits[j]] = [suits[j], suits[i]];
+	}
+
+	// Stock: A→Q for all 4 suits in permuted order (round-robin per rank)
+	const stock: Card[] = [];
+	for (let rank = 1; rank <= 12; rank++) {
+		for (const suit of suits) {
+			stock.push({ id: `${suit}-${rank}`, suit, rank: rank as Card['rank'], faceUp: false });
+		}
+	}
+
+	// Tableau: Kings in cols 0-3, cols 4-6 empty
+	const tableau: GameState['tableau'] = [
+		[{ id: `${suits[0]}-13`, suit: suits[0], rank: 13, faceUp: true }],
+		[{ id: `${suits[1]}-13`, suit: suits[1], rank: 13, faceUp: true }],
+		[{ id: `${suits[2]}-13`, suit: suits[2], rank: 13, faceUp: true }],
+		[{ id: `${suits[3]}-13`, suit: suits[3], rank: 13, faceUp: true }],
+		[], [], []
+	];
+
+	return {
+		stock,
+		waste: [],
+		foundations: [[], [], [], []],
+		tableau,
+		score: 0,
+		drawMode,
+		moves: 0,
+		startTime: Date.now(),
+		endTime: null,
+		hintsUsed: 0,
+		recycleCount: 0,
+		mode: 'daily',
+		seed
+	};
 }
