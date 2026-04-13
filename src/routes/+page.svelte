@@ -222,7 +222,7 @@
 
 	<!-- ─── BOARD ───────────────────────────────── -->
 	<div class="board-wrap">
-		<main class="board">
+		<main class="board" style="--tableau-scale:{screen.tableauScale}">
 			<section class="top-row">
 				<StockPile cards={gs.state.stock} hinted={hintStock} />
 				<WastePile cards={gs.state.waste} drawMode={gs.state.drawMode} hintedCardId={hintedCardId} />
@@ -550,6 +550,8 @@
 	.tableau-row { display: flex; align-items: flex-start; gap: var(--col-gap, 8px); }
 	.tableau-col { flex: 1; min-width: 0; }
 	.tableau-row {
+		transform: scale(var(--tableau-scale, 1));
+		transform-origin: top center;
 	}
 
 	.drag-ghost {

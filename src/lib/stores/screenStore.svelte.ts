@@ -8,6 +8,7 @@ let _colGap = $state(8);
 let _faceUpOffset = $state(28);
 let _faceDownOffset = $state(18);
 let _wasteOffset = $state(18);
+let _tableauScale = $state(1);
 
 function compute() {
 	if (typeof window === 'undefined') return;
@@ -16,17 +17,21 @@ function compute() {
 	const topbarEl = document.querySelector('.top-bar') as HTMLElement | null;
 	const topbarH = topbarEl ? topbarEl.offsetHeight : TOPBAR_H;
 	const vh = window.innerHeight - topbarH;
-	const pad = Math.max(4, Math.min(14, vw * 0.012));
-	const gap = Math.max(3, Math.min(8, vw * 0.006));
+	const pad = Math.max(4, Math.min(24, vw * 0.012));
+	const gap = Math.max(3, Math.min(14, vw * 0.006));
 
-	// Width: fit 7 columns
+	// Width: fit 7 columns — primary driver of card size
 	const rawW = (vw - 2 * pad - 6 * gap) / 7;
+	let w = Math.max(38, Math.min(160, Math.floor(rawW)));
+	let h = Math.floor(w * 1.4);
 
-	// Height: fit top-row + tableau (~5 face-up cards per column on mobile)
-	const rawH = (vh - 2 * pad - gap) / (2.8 * 1.4);
-
-	const w = Math.max(38, Math.min(120, Math.floor(Math.min(rawW, rawH))));
-	const h = Math.floor(w * 1.4);
+	// Only reduce card size if the minimum layout (top row + gap + partial tableau) won't fit
+	const minVH = 2.2 * h + gap + 2 * pad;
+	if (vh < minVH) {
+		h = Math.max(53, Math.floor((vh - 2 * pad - gap) / 2.2));
+		w = Math.max(38, Math.floor(h / 1.4));
+		h = Math.floor(w * 1.4);
+	}
 
 	_cardW = w;
 	_cardH = h;
@@ -37,12 +42,15 @@ function compute() {
 	_faceUpOffset = Math.max(10, Math.min(relaxedOffset, maxTableauOffset));
 	_faceDownOffset = Math.max(7, Math.floor(h * 0.15));
 	_wasteOffset = Math.max(9, Math.floor(w * 0.22));
+	_tableauScale = _faceUpOffset / relaxedOffset;
+
 	const r = document.documentElement;
 	r.style.setProperty('--card-w', w + 'px');
 	r.style.setProperty('--card-h', h + 'px');
 	r.style.setProperty('--col-gap', gap + 'px');
 	r.style.setProperty('--board-pad', pad + 'px');
 	r.style.setProperty('--face-up-offset', _faceUpOffset + 'px');
+	r.style.setProperty('--tableau-scale', String(_tableauScale));
 }
 
 // Re-run on every HMR save
@@ -55,6 +63,7 @@ export const screen = {
 	get faceUpOffset() { return _faceUpOffset; },
 	get faceDownOffset() { return _faceDownOffset; },
 	get wasteOffset() { return _wasteOffset; },
+	get tableauScale() { return _tableauScale; },
 
 	init() {
 		compute();
