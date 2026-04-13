@@ -20,13 +20,15 @@ function compute() {
 	const pad = Math.max(4, Math.min(14, vw * 0.012));
 	const gap = Math.max(3, Math.min(8, vw * 0.006));
 
-	// Width: fit 7 columns — no artificial cap, let big screens use the space
+	// Width: fit 7 columns
 	const rawW = (vw - 2 * pad - 6 * gap) / 7;
 
-	// Height: card height must leave room for the tableau (top card row + ~6 face-up offsets + face-down cards)
-	// We allow the tableau to scroll vertically if it overflows, so only the card size itself is constrained
-	// by width. We still cap height so cards don't become taller than they are wide * 1.4.
-	const w = Math.max(38, Math.floor(rawW));
+	// Height: card must leave room for top row + tableau with ~5 face-up cards visible
+	// top row = 1 card height, tableau = card height + 5 * faceUpOffset ≈ card height * (1 + 5*0.28)
+	// Total ≈ card height * 3.4  →  maxH = vh / 3.4
+	const rawH = vh / 3.4;
+
+	const w = Math.max(38, Math.floor(Math.min(rawW, rawH)));
 	const h = Math.floor(w * 1.4);
 
 	_cardW = w;
