@@ -24,7 +24,7 @@
 	try {
 		const loaded = gameStore.loadSaved();
 		if (loaded) {
-			if (gameStore.state.mode === 'daily' && gameStore.state.seed !== todaySeed()) {
+			if (gameStore.state.mode === 'daily' && !gameStore.state.seed.startsWith(todaySeed())) {
 				// Stale daily game from a previous day — discard it, show welcome modal
 				gameStore.clearSaved();
 			} else {
@@ -68,13 +68,30 @@
 		return () => clearInterval(iv);
 	});
 
-	function startGame(mode: 'daily' | 'random', seed: string) {
+	async function startGame(mode: 'daily' | 'random', seed: string) {
+		if (mode === 'daily') {
+			try {
+				const res = await fetch('/api/daily-seed');
+				const data = await res.json();
+				seed = data.seed ?? seed;
+			} catch {}
+		}
 		gs.newGame(gs.state.drawMode, mode, seed);
 		showModal = false;
 	}
 
-	function onNewGame(mode: 'daily' | 'random') {
-		gs.newGame(gs.state.drawMode, mode, mode === 'daily' ? todaySeed() : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`);
+	async function onNewGame(mode: 'daily' | 'random') {
+		if (mode === 'daily') {
+			try {
+				const res = await fetch('/api/daily-seed');
+				const data = await res.json();
+				gs.newGame(gs.state.drawMode, 'daily', data.seed ?? todaySeed());
+			} catch {
+				gs.newGame(gs.state.drawMode, 'daily', todaySeed());
+			}
+		} else {
+			gs.newGame(gs.state.drawMode, 'random', `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`);
+		}
 	}
 
 	let dropTarget = $state<PileLocation | null>(null);
