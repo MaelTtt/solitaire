@@ -20,25 +20,22 @@ function compute() {
 	const pad = Math.max(4, Math.min(14, vw * 0.012));
 	const gap = Math.max(3, Math.min(8, vw * 0.006));
 
-	// Width: fit 7 columns
+	// Width: fit 7 columns — no artificial cap, let big screens use the space
 	const rawW = (vw - 2 * pad - 6 * gap) / 7;
 
-	// Height: fit top-row + tableau (~5 face-up cards per column on mobile)
-	const rawH = (vh - 2 * pad - gap) / (2.8 * 1.4);
-
-	const w = Math.max(38, Math.min(120, Math.floor(Math.min(rawW, rawH))));
+	// Height: card height must leave room for the tableau (top card row + ~6 face-up offsets + face-down cards)
+	// We allow the tableau to scroll vertically if it overflows, so only the card size itself is constrained
+	// by width. We still cap height so cards don't become taller than they are wide * 1.4.
+	const w = Math.max(38, Math.floor(rawW));
 	const h = Math.floor(w * 1.4);
 
 	_cardW = w;
 	_cardH = h;
 	_colGap = gap;
-	const availableBoardHeight = vh - 2 * pad - gap - h;
-	const relaxedOffset = Math.max(12, Math.floor(h * 0.24));
-	const maxTableauOffset = Math.floor(Math.max(availableBoardHeight - h, h * 0.45) / 18);
-	_faceUpOffset = Math.max(10, Math.min(relaxedOffset, maxTableauOffset));
+	_faceUpOffset = Math.max(12, Math.floor(h * 0.24));
 	_faceDownOffset = Math.max(7, Math.floor(h * 0.15));
 	_wasteOffset = Math.max(9, Math.floor(w * 0.22));
-	_tableauScale = _faceUpOffset / relaxedOffset;
+	_tableauScale = 1;
 
 	const r = document.documentElement;
 	r.style.setProperty('--card-w', w + 'px');
