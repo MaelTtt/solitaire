@@ -10,6 +10,9 @@ let _faceDownOffset = $state(18);
 let _wasteOffset = $state(18);
 let _tableauScale = $state(1);
 
+// Maximum card width on large/HiDPI desktop screens (CSS px — already device-independent)
+const MAX_CARD_W = 130;
+
 function compute() {
 	if (typeof window === 'undefined') return;
 	const vw = window.innerWidth;
@@ -28,7 +31,7 @@ function compute() {
 	// Total ≈ card height * 3.4  →  maxH = vh / 3.4
 	const rawH = vh / 3.4;
 
-	const w = Math.max(38, Math.floor(Math.min(rawW, rawH)));
+	const w = Math.max(38, Math.floor(Math.min(rawW, rawH, MAX_CARD_W)));
 	const h = Math.floor(w * 1.4);
 
 	_cardW = w;
