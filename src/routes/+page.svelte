@@ -4,7 +4,7 @@
 	import { dragState } from '$lib/utils/dragState.svelte';
 	import { screen } from '$lib/stores/screenStore.svelte';
 	import { canMoveToFoundation, canMoveToTableau } from '$lib/game/rules';
-	import { fmtTime } from '$lib/stores/leaderboardStore.svelte';
+	import { fmtTime, hasPlayedDailyToday } from '$lib/stores/leaderboardStore.svelte';
 	import { todaySeed } from '$lib/game/seedRng';
 	import type { PileLocation } from '$lib/game/types';
 	import TableauPile from '$lib/components/TableauPile.svelte';
@@ -69,6 +69,11 @@
 	});
 
 	async function startGame(mode: 'daily' | 'random', seed: string) {
+		if (mode === 'daily' && hasPlayedDailyToday()) {
+			// Already played daily today — fallback to random
+			mode = 'random';
+			seed = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+		}
 		if (mode === 'daily') {
 			try {
 				const res = await fetch('/api/daily-seed');
@@ -81,6 +86,10 @@
 	}
 
 	async function onNewGame(mode: 'daily' | 'random') {
+		if (mode === 'daily' && hasPlayedDailyToday()) {
+			// Already played daily today — switch to random instead
+			mode = 'random';
+		}
 		if (mode === 'daily') {
 			try {
 				const res = await fetch('/api/daily-seed');

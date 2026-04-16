@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { todaySeed } from '$lib/game/seedRng';
-	import { leaderboard, todayDate, fmtTime, seedLabel } from '$lib/stores/leaderboardStore.svelte';
+	import { leaderboard, todayDate, fmtTime, seedLabel, hasPlayedDailyToday } from '$lib/stores/leaderboardStore.svelte';
 
 	interface Props {
 		onstart: (mode: 'daily' | 'random', seed: string) => void;
@@ -9,9 +9,10 @@
 
 	const today = todayDate();
 	const seed = todaySeed();
+	const dailyPlayed = hasPlayedDailyToday();
 
 	const dailyBest = $derived(leaderboard.daily[0] ?? null);
-	const allTimeBest = $derived(leaderboard.allTime[0] ?? null);
+	const randomBest = $derived(leaderboard.randomBest);
 
 	function fmtDate(iso: string) {
 		return new Date(iso + 'T00:00:00Z').toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
@@ -25,10 +26,14 @@
 		<p class="date">{new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}</p>
 
 		<div class="modes">
-			<button class="mode-btn daily" onclick={() => onstart('daily', seed)}>
+			<button class="mode-btn daily" onclick={() => onstart('daily', seed)} disabled={dailyPlayed}>
 				<span class="mode-icon">📅</span>
 				<span class="mode-title">Partie du jour</span>
-				<span class="mode-desc">Les mêmes cartes pour tous aujourd'hui</span>
+				{#if dailyPlayed}
+					<span class="mode-desc played">Déjà jouée aujourd'hui</span>
+				{:else}
+					<span class="mode-desc">Les mêmes cartes pour tous aujourd'hui</span>
+				{/if}
 				{#if dailyBest}
 					<span class="mode-best">Meilleur aujourd'hui : {dailyBest.name} — {dailyBest.score}pts</span>
 				{/if}
@@ -38,8 +43,8 @@
 				<span class="mode-icon">🎲</span>
 				<span class="mode-title">Partie aléatoire</span>
 				<span class="mode-desc">Nouveau mélange à chaque partie</span>
-				{#if allTimeBest}
-					<span class="mode-best">Meilleur total : {allTimeBest.name} — {allTimeBest.score}pts</span>
+				{#if randomBest}
+					<span class="mode-best">Meilleur aléatoire : {randomBest.name} — {randomBest.score}pts</span>
 				{/if}
 			</button>
 		</div>
@@ -154,7 +159,13 @@
 	.mode-icon { font-size: 20px; margin-bottom: 2px; }
 	.mode-title { font-size: 16px; }
 	.mode-desc { font-size: 12px; color: rgba(255,255,255,0.5); }
+	.mode-desc.played { color: rgba(255,255,255,0.35); font-style: italic; }
 	.mode-best { font-size: 11px; color: rgba(255,255,255,0.55); margin-top: 3px; }
+	.mode-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+	.mode-btn:disabled:active { transform: none; box-shadow: 0 4px 0 rgba(0,0,0,0.4); }
+	.mode-btn:disabled:hover { transform: none; box-shadow: 0 4px 0 rgba(0,0,0,0.4); }
+	.daily:disabled { box-shadow: 0 4px 0 #1a6a38; }
+	.daily:disabled:active, .daily:disabled:hover { box-shadow: 0 4px 0 #1a6a38; transform: none; }
 
 	.lb-preview { text-align: left; margin-top: 4px; }
 	.lb-preview summary {

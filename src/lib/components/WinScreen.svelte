@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { gameStore } from '$lib/stores/gameStore.svelte';
-	import { leaderboard, todayDate, fmtTime } from '$lib/stores/leaderboardStore.svelte';
+	import { leaderboard, todayDate, fmtTime, hasPlayedDailyToday } from '$lib/stores/leaderboardStore.svelte';
 
 	interface Props {
 		finalScore: number;
@@ -32,6 +32,7 @@
 		});
 	}
 
+	const dailyPlayed = $derived(mode === 'daily' && hasPlayedDailyToday());
 	const board = $derived(mode === 'daily' ? leaderboard.daily : leaderboard.allTime);
 	const label = $derived(mode === 'daily' ? 'Classement du jour' : 'Classement général');
 </script>
@@ -77,10 +78,14 @@
 		{/if}
 
 		<div class="actions">
-			<button class="play-btn" onclick={() => onNewGame(mode)}>Rejouer</button>
-			<button class="play-btn alt" onclick={() => onNewGame(mode === 'daily' ? 'random' : 'daily')}>
-				{mode === 'daily' ? '🎲 Aléatoire' : '📅 Quotidien'}
-			</button>
+			{#if mode === 'daily' && dailyPlayed}
+				<button class="play-btn alt" onclick={() => onNewGame('random')}>🎲 Aléatoire</button>
+			{:else}
+				<button class="play-btn" onclick={() => onNewGame(mode)}>Rejouer</button>
+				<button class="play-btn alt" onclick={() => onNewGame(mode === 'daily' ? 'random' : 'daily')}>
+					{mode === 'daily' ? '🎲 Aléatoire' : '📅 Quotidien'}
+				</button>
+			{/if}
 		</div>
 	</div>
 </div>
