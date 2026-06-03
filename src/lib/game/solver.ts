@@ -40,7 +40,7 @@ export function dealSolvableState(drawMode: 1 | 3 = 1, mode: GameMode = 'random'
 	let bestState: GameState | null = null;
 	let bestResult: SolvabilityResult | null = null;
 	for (let attempt = 0; attempt < MAX_CANDIDATE_ATTEMPTS; attempt++) {
-		const attemptSeed = `${baseSeed}#${attempt}`;
+		const attemptSeed = baseSeed.includes('#') && attempt === 0 ? baseSeed : `${baseSeed}#${attempt}`;
 		const deck = seededShuffle(raw, attemptSeed);
 		const state = dealFromDeck(deck, drawMode, mode, attemptSeed);
 		const result = solveKlondike(state);
@@ -167,7 +167,8 @@ function dealFromDeck(deck: Card[], drawMode: 1 | 3, mode: GameMode, seed: strin
 		hintsUsed: 0,
 		recycleCount: 0,
 		mode,
-		seed
+		seed,
+		dailyRestartCount: 0
 	};
 }
 

@@ -25,6 +25,7 @@ export interface GameState {
 	recycleCount: number;
 	mode: GameMode;
 	seed: string;
+	dailyRestartCount: number;
 }
 
 export type PileType = 'stock' | 'waste' | 'foundation' | 'tableau';

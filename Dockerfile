@@ -15,7 +15,8 @@ RUN apk add --no-cache python3 make g++
 COPY package.json bun.lock* ./
 RUN npm install -g bun && bun install --frozen-lockfile --production
 COPY --from=builder /app/build ./build
+COPY --from=builder /app/server-dist ./server-dist
 ENV PORT=3000
 ENV DATA_DIR=/data
 EXPOSE 3000
-CMD ["node", "build/index.js"]
+CMD ["node", "server-dist/index.js"]
