@@ -56,7 +56,7 @@ const drawFallback = (canvas: HTMLCanvasElement) => {
 		const vh = Math.max(1, window.innerHeight);
 		canvas.width = vw;
 		canvas.height = vh;
-		const target = 256;
+		const target = 360;
 		const scale = target / Math.max(vw, vh);
 		buffer.width = Math.max(64, Math.round(vw * scale));
 		buffer.height = Math.max(64, Math.round(vh * scale));
@@ -64,7 +64,7 @@ const drawFallback = (canvas: HTMLCanvasElement) => {
 	};
 
 	const frame = (now = performance.now()) => {
-		if (now - lastFrame < 50) {
+		if (now - lastFrame < 70) {
 			raf = requestAnimationFrame(frame);
 			return;
 		}
