@@ -52,11 +52,14 @@ const drawFallback = (canvas: HTMLCanvasElement) => {
 	let lastFrame = 0;
 
 	const resize = () => {
-		const dpr = window.devicePixelRatio || 1;
-		canvas.width = Math.floor(window.innerWidth * dpr);
-		canvas.height = Math.floor(window.innerHeight * dpr);
-		buffer.width = Math.max(240, Math.min(640, Math.floor(canvas.width / 2)));
-		buffer.height = Math.max(135, Math.min(360, Math.floor(canvas.height / 2)));
+		const vw = Math.max(1, window.innerWidth);
+		const vh = Math.max(1, window.innerHeight);
+		canvas.width = vw;
+		canvas.height = vh;
+		const target = 256;
+		const scale = target / Math.max(vw, vh);
+		buffer.width = Math.max(64, Math.round(vw * scale));
+		buffer.height = Math.max(64, Math.round(vh * scale));
 		ctx.imageSmoothingEnabled = true;
 	};
 
