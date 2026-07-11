@@ -11,7 +11,7 @@ import {
 	SCORE_WASTE_TO_TABLEAU,
 	timeBonus
 } from '@/lib/game/score';
-import { dealSolvableState } from '@/lib/game/solver';
+import { dealSeededState, matchesSeedBase } from '@/lib/game/solver';
 import { todaySeed } from '@/lib/game/seedRng';
 
 const MAX_UNDO = 100;
@@ -329,7 +329,7 @@ function loadInitialGame(): InitialGame {
 			localStorage.removeItem(SAVE_KEY);
 			return { state: dealState(), won: false, stuck: false, loaded: false };
 		}
-		if (saved.state.mode === 'daily' && !saved.state.seed.startsWith(todaySeed())) {
+		if (saved.state.mode === 'daily' && !matchesSeedBase(saved.state.seed, todaySeed())) {
 			localStorage.removeItem(SAVE_KEY);
 			return { state: dealState(), won: false, stuck: false, loaded: false };
 		}
@@ -349,7 +349,7 @@ function saveGame(state: GameState, won: boolean, stuck: boolean): void {
 
 function dealState(drawMode: 1 | 3 = 1, mode: GameMode = 'random', seed = '', dailyRestartCount = 0): GameState {
 	const baseSeed = seed || `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-	const state = dealSolvableState(drawMode, mode, baseSeed);
+	const state = dealSeededState(drawMode, mode, baseSeed);
 	return { ...state, dailyRestartCount };
 }
 

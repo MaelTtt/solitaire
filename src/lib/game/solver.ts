@@ -1,6 +1,6 @@
 import { createDeck } from './deck';
 import type { Card, GameMode, GameState, PileLocation } from './types';
-import { canMoveToFoundation, canMoveToTableau, findFoundationIndex, hasNoFaceDownCards, isWon } from './rules';
+import { canMoveToFoundation, canMoveToTableau, findFoundationIndex, isWon } from './rules';
 import { seededShuffle } from './seedRng';
 
 type Tableau = GameState['tableau'];
@@ -11,6 +11,19 @@ export interface SolvabilityResult {
 	moveCount: number;
 	branchCount: number;
 	score: number;
+	exploredStates: number;
+}
+
+export interface SolverOptions {
+	maxDepth?: number;
+	maxVisitedStates?: number;
+}
+
+export interface VerifiedSeedResult {
+	seed: string;
+	difficulty: number;
+	solutionMoves: number;
+	exploredStates: number;
 }
 
 interface SearchState {
@@ -26,118 +39,133 @@ interface Move {
 	from: PileLocation;
 	to: PileLocation;
 	cardId?: string;
+	viaIndex?: number;
 	priority: number;
 }
 
-const MAX_CANDIDATE_ATTEMPTS = 14;
-const MAX_FRONTIER_SIZE = 28;
-const MAX_DEPTH = 110;
-const MAX_VISITED_STATES = 4500;
-
-export function dealSolvableState(drawMode: 1 | 3 = 1, mode: GameMode = 'random', seed = ''): GameState {
-	const raw = createDeck();
-	const baseSeed = seed || randomSeed();
-	let bestState: GameState | null = null;
-	let bestResult: SolvabilityResult | null = null;
-	for (let attempt = 0; attempt < MAX_CANDIDATE_ATTEMPTS; attempt++) {
-		const attemptSeed = baseSeed.includes('#') && attempt === 0 ? baseSeed : `${baseSeed}#${attempt}`;
-		const deck = seededShuffle(raw, attemptSeed);
-		const state = dealFromDeck(deck, drawMode, mode, attemptSeed);
-		const result = solveKlondike(state);
-		if (
-			!bestResult ||
-			result.score > bestResult.score ||
-			(result.score === bestResult.score && result.branchCount > bestResult.branchCount)
-		) {
-			bestResult = result;
-			bestState = state;
-		}
-		if (result.solved && result.branchCount >= 7) {
-			return state;
-		}
-	}
-	if (bestState) return bestState;
-	const fallbackDeck = seededShuffle(raw, `${baseSeed}#0`);
-	return dealFromDeck(fallbackDeck, drawMode, mode, `${baseSeed}#0`);
+interface SearchEntry {
+	state: SearchState;
+	depth: number;
 }
 
-export function solveKlondike(initial: GameState): SolvabilityResult {
+const CERTIFIED_V1_SEED_PREFIX = 'certified:';
+const CERTIFIED_V2_SEED_PREFIX = 'certified-v2:';
+const VERIFIED_V3_SEED_PREFIX = 'verified-v3:';
+const MAX_DEPTH = 260;
+const MAX_VISITED_STATES = 250000;
+
+export function dealSeededState(drawMode: 1 | 3 = 1, mode: GameMode = 'random', seed = ''): GameState {
+	const exactSeed = seed || randomSeed();
+	if (exactSeed.startsWith(VERIFIED_V3_SEED_PREFIX)) {
+		const shuffleSeed = exactSeed.slice(VERIFIED_V3_SEED_PREFIX.length);
+		return dealFromDeck(seededShuffle(createDeck(), shuffleSeed), drawMode, mode, exactSeed);
+	}
+	if (exactSeed.startsWith(CERTIFIED_V2_SEED_PREFIX)) {
+		return dealCertifiedV2State(exactSeed.slice(CERTIFIED_V2_SEED_PREFIX.length), drawMode, mode, exactSeed);
+	}
+	if (exactSeed.startsWith(CERTIFIED_V1_SEED_PREFIX)) {
+		return dealCertifiedV1State(exactSeed.slice(CERTIFIED_V1_SEED_PREFIX.length), drawMode, mode, exactSeed);
+	}
+	return dealFromDeck(seededShuffle(createDeck(), exactSeed), drawMode, mode, exactSeed);
+}
+
+export function solveKlondike(initial: GameState, options: SolverOptions = {}): SolvabilityResult {
+	const maxDepth = options.maxDepth ?? MAX_DEPTH;
+	const maxVisitedStates = options.maxVisitedStates ?? MAX_VISITED_STATES;
 	const start = cloneSearchState(initial);
-	const visited = new Set<string>();
-	let frontier: Array<{ state: SearchState; depth: number; score: number }> = [{ state: start, depth: 0, score: evaluateState(start) }];
-	let bestScore = frontier[0].score;
+	if (start.drawMode === 1 && start.waste.length > 0) {
+		start.stock.push(...start.waste.map((card) => ({ ...card, faceUp: false })));
+		start.waste = [];
+	}
+	const seen = new Map<string, number>([[serializeState(start), 0]]);
+	const frontier: SearchEntry[] = [{ state: start, depth: 0 }];
+	let bestScore = evaluateState(start);
 	let bestDepth = 0;
 	let branchCount = getCandidateMoves(start).length;
+	let exploredStates = 0;
 
-	for (let depth = 0; depth < MAX_DEPTH && frontier.length > 0 && visited.size < MAX_VISITED_STATES; depth++) {
-		const nextLayer: Array<{ state: SearchState; depth: number; score: number }> = [];
-
-		for (const entry of frontier) {
-			const key = serializeState(entry.state);
-			if (visited.has(key)) continue;
-			visited.add(key);
-
-			if (isWon(entry.state as GameState)) {
-				return { solved: true, moveCount: entry.depth, branchCount, score: 100000 - entry.depth };
-			}
-
-			const moves = getCandidateMoves(entry.state);
-			if (moves.length > 1) branchCount += Math.min(3, moves.length - 1);
-			for (const move of moves.slice(0, 5)) {
-				const next = applyMove(entry.state, move);
-				if (!next) continue;
-				const nextScore = evaluateState(next);
-				bestScore = Math.max(bestScore, nextScore);
-				if (nextScore === bestScore) bestDepth = entry.depth + 1;
-				nextLayer.push({ state: next, depth: entry.depth + 1, score: nextScore });
-			}
+	while (frontier.length > 0 && exploredStates < maxVisitedStates) {
+		const entry = frontier.pop()!;
+		exploredStates++;
+		if (isWon(entry.state as GameState)) {
+			return {
+				solved: true,
+				moveCount: entry.depth,
+				branchCount,
+				score: 100000 - entry.depth,
+				exploredStates
+			};
 		}
+		if (entry.depth >= maxDepth) continue;
 
-		nextLayer.sort((a, b) => b.score - a.score);
-		frontier = pruneFrontier(nextLayer, visited);
+		const moves = getCandidateMoves(entry.state);
+		if (moves.length > 1) branchCount += Math.min(3, moves.length - 1);
+		for (let index = moves.length - 1; index >= 0; index--) {
+			const move = moves[index];
+			const next = applyMove(entry.state, move);
+			if (!next) continue;
+			const key = serializeState(next);
+			const depth = entry.depth + 1;
+			const previousDepth = seen.get(key);
+			if (previousDepth !== undefined && previousDepth <= depth) continue;
+			seen.set(key, depth);
+			const nextScore = evaluateState(next);
+			bestScore = Math.max(bestScore, nextScore);
+			if (nextScore === bestScore) bestDepth = depth;
+			frontier.push({ state: next, depth });
+		}
 	}
 
-	return { solved: false, moveCount: bestDepth, branchCount, score: bestScore };
+	return {
+		solved: false,
+		moveCount: bestDepth,
+		branchCount,
+		score: bestScore,
+		exploredStates
+	};
 }
 
-// ─── Server-side seed finder ──────────────────────────────────────────────────
-// Runs the beam solver across many more attempts than the client-side version
-// can afford, selecting the best-scoring deal. With draw-1, ~90% of random deals
-// are actually solvable — scanning 200 attempts virtually guarantees a good deal.
-// Returns the best attempt seed string found.
-export function findSolvableSeed(
-	baseSeed: string,
-	drawMode: 1 | 3 = 1,
-	maxAttempts = 200
-): string {
-	const raw = createDeck();
-	let bestSeed = `${baseSeed}#0`;
-	let bestScore = -Infinity;
-	let bestBranch = 0;
+export function createCertifiedSeed(baseSeed: string): string {
+	return `${CERTIFIED_V2_SEED_PREFIX}${baseSeed}`;
+}
 
-	for (let i = 0; i < maxAttempts; i++) {
-		const attemptSeed = `${baseSeed}#${i}`;
-		const deck = seededShuffle(raw, attemptSeed);
-		const state = dealFromDeck(deck, drawMode, 'daily', attemptSeed);
-		const result = solveKlondike(state);
+export function findVerifiedSeed(baseSeed: string, drawMode: 1 | 3 = 1, maxAttempts = 24): VerifiedSeedResult | null {
+	let best: VerifiedSeedResult | null = null;
 
-		// Prefer proven-solved deals with good branching (interesting game)
-		if (result.solved) {
-			if (!bestScore || result.branchCount > bestBranch) {
-				bestSeed = attemptSeed;
-				bestScore = result.score;
-				bestBranch = result.branchCount;
+	for (let attempt = 0; attempt < maxAttempts; attempt++) {
+		const shuffleSeed = `${baseSeed}#${attempt}`;
+		const seed = `${VERIFIED_V3_SEED_PREFIX}${shuffleSeed}`;
+		const state = dealSeededState(drawMode, 'random', seed);
+		const exposed = state.tableau.map((pile) => pile[pile.length - 1]);
+		const lowCards = exposed.filter((card) => card.rank <= 4).length;
+		const aces = exposed.filter((card) => card.rank === 1).length;
+		if (aces === 0 && lowCards <= 2) {
+			const result = solveKlondike(state, { maxVisitedStates: 10000 });
+			if (result.solved) {
+				const difficulty = Math.round(
+					result.moveCount * 2 +
+					Math.log2(result.exploredStates + 1) * 18 -
+					lowCards * 12
+				);
+				const candidate = {
+					seed,
+					difficulty,
+					solutionMoves: result.moveCount,
+					exploredStates: result.exploredStates
+				};
+				if (!best || candidate.difficulty > best.difficulty) best = candidate;
 			}
-			// Good enough — stop early
-			if (result.branchCount >= 20) break;
-		} else if (result.score > bestScore) {
-			bestSeed = attemptSeed;
-			bestScore = result.score;
-			bestBranch = result.branchCount;
 		}
+		if (attempt >= 7 && best && best.exploredStates >= 500) break;
 	}
 
-	return bestSeed;
+	return best;
+}
+
+export function matchesSeedBase(seed: string, baseSeed: string): boolean {
+	return seed === baseSeed ||
+		seed.startsWith(`${baseSeed}#`) ||
+		seed.startsWith(`${VERIFIED_V3_SEED_PREFIX}${baseSeed}#`);
 }
 
 function randomSeed() {
@@ -172,6 +200,136 @@ function dealFromDeck(deck: Card[], drawMode: 1 | 3, mode: GameMode, seed: strin
 	};
 }
 
+function dealCertifiedV1State(baseSeed: string, drawMode: 1 | 3, mode: GameMode, seed: string): GameState {
+	return dealFromCertifiedPath(createV1FoundationPath(baseSeed), baseSeed, drawMode, mode, seed, 'layer');
+}
+
+function dealCertifiedV2State(baseSeed: string, drawMode: 1 | 3, mode: GameMode, seed: string): GameState {
+	return dealFromCertifiedPath(createVariedFoundationPath(baseSeed), baseSeed, drawMode, mode, seed, 'tableau');
+}
+
+function createVariedFoundationPath(baseSeed: string): Card[] {
+	const deck = createDeck();
+	const nextRank = new Map<Card['suit'], number>([
+		['spades', 1],
+		['hearts', 1],
+		['diamonds', 1],
+		['clubs', 1]
+	]);
+	const path: Card[] = [];
+
+	for (let step = 0; step < 52; step++) {
+		const eligible = [...nextRank.entries()]
+			.filter(([, rank]) => rank <= 13)
+			.map(([suit]) => suit);
+		const suit = seededShuffle(eligible, `${baseSeed}:path:${step}`)[0];
+		const rank = nextRank.get(suit) ?? 1;
+		path.push(deck.find((card) => card.suit === suit && card.rank === rank)!);
+		nextRank.set(suit, rank + 1);
+	}
+
+	return path;
+}
+
+function dealFromCertifiedPath(
+	foundationOrder: Card[],
+	baseSeed: string,
+	drawMode: 1 | 3,
+	mode: GameMode,
+	seed: string,
+	tableauSeedPart: string
+): GameState {
+	const removalOrder = foundationOrder.slice(0, 28);
+	const assigned: Card[][] = [[], [], [], [], [], [], []];
+	let cardIndex = 0;
+	for (let layer = 0; layer < 7; layer++) {
+		const columns = seededShuffle(
+			[0, 1, 2, 3, 4, 5, 6].filter((column) => column + 1 > layer),
+			`${baseSeed}:${tableauSeedPart}:${layer}`
+		);
+		for (const column of columns) assigned[column].push(removalOrder[cardIndex++]);
+	}
+
+	const tableau = assigned.map((cards) => cards.reverse().map((card, index, pile) => ({
+		...card,
+		faceUp: index === pile.length - 1
+	}))) as Tableau;
+	const stock = foundationOrder.slice(28).reverse().map((card) => ({ ...card, faceUp: false }));
+
+	return {
+		stock,
+		waste: [],
+		foundations: [[], [], [], []],
+		tableau,
+		score: 0,
+		drawMode,
+		moves: 0,
+		startTime: Date.now(),
+		endTime: null,
+		hintsUsed: 0,
+		recycleCount: 0,
+		mode,
+		seed,
+		dailyRestartCount: 0
+	};
+}
+
+export function verifyCertifiedDeal(initial: GameState): boolean {
+	const prefix = initial.seed.startsWith(CERTIFIED_V2_SEED_PREFIX)
+		? CERTIFIED_V2_SEED_PREFIX
+		: initial.seed.startsWith(CERTIFIED_V1_SEED_PREFIX)
+			? CERTIFIED_V1_SEED_PREFIX
+			: '';
+	if (!prefix) return false;
+
+	const baseSeed = initial.seed.slice(prefix.length);
+	const path = prefix === CERTIFIED_V2_SEED_PREFIX
+		? createVariedFoundationPath(baseSeed)
+		: createV1FoundationPath(baseSeed);
+	const state = cloneSearchState(initial);
+	let pathIndex = 0;
+
+	for (; pathIndex < 28; pathIndex++) {
+		const expected = path[pathIndex];
+		const column = state.tableau.findIndex((pile) => pile[pile.length - 1]?.id === expected.id);
+		if (column < 0) return false;
+		const card = state.tableau[column].pop();
+		if (!card?.faceUp) return false;
+		const foundationIndex = findFoundationIndex(card, state as GameState);
+		if (foundationIndex < 0) return false;
+		state.foundations[foundationIndex].push(card);
+		const next = state.tableau[column][state.tableau[column].length - 1];
+		if (next) next.faceUp = true;
+	}
+
+	while (state.stock.length > 0) {
+		const count = Math.min(state.drawMode, state.stock.length);
+		const drawn = state.stock.splice(state.stock.length - count, count);
+		drawn.forEach((card) => (card.faceUp = true));
+		state.waste.push(...drawn);
+
+		for (let i = 0; i < count; i++, pathIndex++) {
+			const expected = path[pathIndex];
+			const card = state.waste.pop();
+			if (!card || card.id !== expected.id) return false;
+			const foundationIndex = findFoundationIndex(card, state as GameState);
+			if (foundationIndex < 0) return false;
+			state.foundations[foundationIndex].push(card);
+		}
+	}
+
+	return pathIndex === 52 && state.waste.length === 0 && isWon(state as GameState);
+}
+
+function createV1FoundationPath(baseSeed: string): Card[] {
+	const deck = createDeck();
+	const path: Card[] = [];
+	for (let rank = 1; rank <= 13; rank++) {
+		path.push(...seededShuffle(deck.filter((card) => card.rank === rank), `${baseSeed}:rank:${rank}`));
+	}
+	return path;
+}
+
 function cloneSearchState(state: Pick<GameState, 'stock' | 'waste' | 'foundations' | 'tableau' | 'drawMode' | 'recycleCount'>): SearchState {
 	return {
 		stock: state.stock.map(cloneCard),
@@ -203,23 +361,7 @@ function evaluateState(state: SearchState): number {
 		}
 		return sum + moves;
 	}, 0);
-	return foundationCards * 90 + faceUpCards * 8 + tableauMoves * 6 + emptyColumns * 12 - hiddenCards * 5 - state.recycleCount * 10;
-}
-
-function pruneFrontier(
-	frontier: Array<{ state: SearchState; depth: number; score: number }>,
-	visited: Set<string>
-): Array<{ state: SearchState; depth: number; score: number }> {
-	const kept: Array<{ state: SearchState; depth: number; score: number }> = [];
-	const seen = new Set<string>();
-	for (const entry of frontier) {
-		const key = serializeState(entry.state);
-		if (visited.has(key) || seen.has(key)) continue;
-		seen.add(key);
-		kept.push(entry);
-		if (kept.length >= MAX_FRONTIER_SIZE) break;
-	}
-	return kept;
+	return foundationCards * 90 + faceUpCards * 8 + tableauMoves * 6 + emptyColumns * 12 - hiddenCards * 5;
 }
 
 function serializeState(state: SearchState): string {
@@ -227,15 +369,41 @@ function serializeState(state: SearchState): string {
 	// Each card encoded as 2 chars (suit index + rank), face-up bit appended for tableau/stock
 	const SUIT_IDX: Record<string, string> = { spades: 'a', hearts: 'b', diamonds: 'c', clubs: 'd' };
 	const enc = (c: Card, withFace = false) => SUIT_IDX[c.suit] + c.rank.toString(16) + (withFace ? (c.faceUp ? '1' : '0') : '');
-	const s = state.stock.map(c => enc(c, true)).join('');
+	const s = state.drawMode === 1
+		? state.stock.map(c => enc(c)).sort().join('')
+		: state.stock.map(c => enc(c, true)).join('');
 	const w = state.waste.map(c => enc(c)).join('');
 	const f = state.foundations.map(p => p.length.toString(16)).join('');
-	const t = state.tableau.map(p => p.map(c => enc(c, true)).join('')).join('|');
-	return `${state.recycleCount}:${f}:${w}:${s}:${t}`;
+	const t = state.tableau.map(p => p.map(c => enc(c, true)).join('')).sort().join('|');
+	return `${f}:${w}:${s}:${t}`;
 }
 
 function getCandidateMoves(state: SearchState): Move[] {
 	const moves: Move[] = [];
+
+	if (state.drawMode === 1) {
+		for (const deckCard of state.stock) {
+			const foundationIndex = findFoundationIndex(deckCard, state as GameState);
+			if (foundationIndex >= 0) {
+				moves.push({
+					from: { type: 'stock', index: 0 },
+					to: { type: 'foundation', index: foundationIndex },
+					cardId: deckCard.id,
+					priority: canSafelyMoveToFoundation(deckCard, state) ? 100 : 60
+				});
+			}
+			for (let i = 0; i < 7; i++) {
+				if (canMoveToTableau(deckCard, state.tableau[i])) {
+					moves.push({
+						from: { type: 'stock', index: 0 },
+						to: { type: 'tableau', index: i },
+						cardId: deckCard.id,
+						priority: state.tableau[i].length === 0 ? 55 : 76
+					});
+				}
+			}
+		}
+	}
 
 	if (state.waste.length > 0) {
 		const wasteCard = state.waste[state.waste.length - 1];
@@ -254,41 +422,73 @@ function getCandidateMoves(state: SearchState): Move[] {
 		const pile = state.tableau[i];
 		if (pile.length === 0) continue;
 
-		const topCard = pile[pile.length - 1];
-		if (topCard.faceUp) {
-			const foundationIndex = findFoundationIndex(topCard, state as GameState);
-			if (foundationIndex >= 0 && canSafelyMoveToFoundation(topCard, state)) {
-				moves.push({ from: { type: 'tableau', index: i }, to: { type: 'foundation', index: foundationIndex }, priority: 95 });
+		for (let cardIndex = pile.length - 1; cardIndex >= 0 && pile[cardIndex].faceUp; cardIndex--) {
+			const card = pile[cardIndex];
+			const foundationIndex = findFoundationIndex(card, state as GameState);
+			if (foundationIndex < 0) continue;
+			const priority = canSafelyMoveToFoundation(card, state) ? 95 : 62;
+			if (cardIndex === pile.length - 1) {
+				moves.push({
+					from: { type: 'tableau', index: i },
+					to: { type: 'foundation', index: foundationIndex },
+					cardId: card.id,
+					priority
+				});
+				continue;
+			}
+			const coveringCard = pile[cardIndex + 1];
+			for (let target = 0; target < 7; target++) {
+				if (target === i || !canMoveToTableau(coveringCard, state.tableau[target])) continue;
+				moves.push({
+					from: { type: 'tableau', index: i },
+					to: { type: 'foundation', index: foundationIndex },
+					cardId: card.id,
+					viaIndex: target,
+					priority
+				});
 			}
 		}
 
-		for (let start = 0; start < pile.length; start++) {
-			if (!pile[start].faceUp) continue;
-			const moving = pile.slice(start);
+		const firstFaceUp = pile.findIndex((card) => card.faceUp);
+		if (firstFaceUp > 0 && !pile[firstFaceUp - 1].faceUp) {
+			const movingCard = pile[firstFaceUp];
 			for (let j = 0; j < 7; j++) {
-				if (i === j) continue;
-				if (!canMoveToTableau(moving[0], state.tableau[j])) continue;
-				const revealsFaceDown = start > 0 && !pile[start - 1].faceUp;
-				const priority = revealsFaceDown ? 90 : state.tableau[j].length === 0 ? 45 : 70;
-				if (moving[0].rank === 13 && state.tableau[j].length === 0 && !revealsFaceDown) continue;
-				moves.push({ from: { type: 'tableau', index: i }, to: { type: 'tableau', index: j }, cardId: moving[0].id, priority });
+				if (i === j || !canMoveToTableau(movingCard, state.tableau[j])) continue;
+				moves.push({
+					from: { type: 'tableau', index: i },
+					to: { type: 'tableau', index: j },
+					cardId: movingCard.id,
+					priority: 90
+				});
 			}
 		}
 	}
 
-	if (state.stock.length > 0) {
+	for (let i = 0; i < 4; i++) {
+		const card = state.foundations[i][state.foundations[i].length - 1];
+		if (!card) continue;
+		for (let j = 0; j < 7; j++) {
+			if (canMoveToTableau(card, state.tableau[j])) {
+				moves.push({ from: { type: 'foundation', index: i }, to: { type: 'tableau', index: j }, priority: 30 });
+			}
+		}
+	}
+
+	if (state.drawMode === 3 && state.stock.length > 0) {
 		moves.push({ from: { type: 'stock', index: 0 }, to: { type: 'stock', index: 0 }, priority: 10 });
-	} else if (state.waste.length > 0 && state.recycleCount < 2 && !hasNoFaceDownCards(state as GameState)) {
+	} else if (state.drawMode === 3 && state.waste.length > 0) {
 		moves.push({ from: { type: 'stock', index: 0 }, to: { type: 'stock', index: 0 }, priority: 5 });
 	}
 
-	return dedupeMoves(moves).sort((a, b) => b.priority - a.priority);
+	const sorted = dedupeMoves(moves).sort((a, b) => b.priority - a.priority);
+	const safeFoundationMoves = sorted.filter((move) => move.to.type === 'foundation' && move.priority >= 95);
+	return safeFoundationMoves.length > 0 ? [safeFoundationMoves[0]] : sorted;
 }
 
 function dedupeMoves(moves: Move[]): Move[] {
 	const seen = new Set<string>();
 	return moves.filter((move) => {
-		const key = `${move.from.type}:${move.from.index}:${move.to.type}:${move.to.index}:${move.cardId ?? ''}`;
+		const key = `${move.from.type}:${move.from.index}:${move.to.type}:${move.to.index}:${move.cardId ?? ''}:${move.viaIndex ?? ''}`;
 		if (seen.has(key)) return false;
 		seen.add(key);
 		return true;
@@ -310,6 +510,22 @@ function applyMove(state: SearchState, move: Move): SearchState | null {
 	const next = cloneSearchState(state);
 
 	if (move.from.type === 'stock') {
+		if (move.to.type !== 'stock' && move.cardId) {
+			const index = next.stock.findIndex((card) => card.id === move.cardId);
+			if (index < 0) return null;
+			const [card] = next.stock.splice(index, 1);
+			card.faceUp = true;
+			const dest = getPile(next, move.to);
+			if (move.to.type === 'foundation') {
+				if (!canMoveToFoundation(card, dest)) return null;
+			} else if (move.to.type === 'tableau') {
+				if (!canMoveToTableau(card, dest)) return null;
+			} else {
+				return null;
+			}
+			dest.push(card);
+			return next;
+		}
 		if (next.stock.length === 0) {
 			next.stock = next.waste.reverse().map((c) => ({ ...c, faceUp: false }));
 			next.waste = [];
@@ -320,6 +536,26 @@ function applyMove(state: SearchState, move: Move): SearchState | null {
 		const drawn = next.stock.splice(next.stock.length - count, count);
 		drawn.forEach((c) => (c.faceUp = true));
 		next.waste.push(...drawn);
+		return next;
+	}
+
+	if (move.from.type === 'tableau' && move.to.type === 'foundation' && move.cardId) {
+		const source = next.tableau[move.from.index];
+		const cardIndex = source.findIndex((card) => card.id === move.cardId);
+		if (cardIndex < 0) return null;
+		if (cardIndex < source.length - 1) {
+			if (move.viaIndex === undefined) return null;
+			const covering = source.splice(cardIndex + 1);
+			const via = next.tableau[move.viaIndex];
+			if (!canMoveToTableau(covering[0], via)) return null;
+			via.push(...covering);
+		}
+		const [card] = source.splice(cardIndex, 1);
+		const dest = next.foundations[move.to.index];
+		if (!canMoveToFoundation(card, dest)) return null;
+		dest.push(card);
+		const sourceTop = source[source.length - 1];
+		if (sourceTop && !sourceTop.faceUp) sourceTop.faceUp = true;
 		return next;
 	}
 

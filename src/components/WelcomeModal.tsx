@@ -9,9 +9,11 @@ interface WelcomeModalProps {
 	entries: LeaderboardEntry[];
 	onStart: (mode: 'daily' | 'random', seed: string) => void;
 	onRename: () => void;
+	startingMode: 'daily' | 'random' | null;
+	startError: string;
 }
 
-export function WelcomeModal({ player, dailyStatus, entries, onStart, onRename }: WelcomeModalProps) {
+export function WelcomeModal({ player, dailyStatus, entries, onStart, onRename, startingMode, startError }: WelcomeModalProps) {
 	const today = todayDate();
 	const daily = dailyRows(entries, today);
 	const allTime = allTimeRows(entries);
@@ -41,22 +43,23 @@ export function WelcomeModal({ player, dailyStatus, entries, onStart, onRename }
 				</div>
 
 				<div class="modes">
-					<button class="mode-btn daily" onClick={() => onStart('daily', todaySeed())} disabled={dailyStatus.completed}>
+					<button class="mode-btn daily" onClick={() => onStart('daily', todaySeed())} disabled={dailyStatus.completed || startingMode !== null}>
 						<span class="mode-icon">📅</span>
 						<span class="mode-title">Today's game</span>
 						<span class={`mode-desc ${dailyStatus.completed ? 'played' : ''}`}>
-							{dailyStatus.completed ? 'Already finished today' : 'Same deal for everyone today'}
+							{startingMode === 'daily' ? 'Checking this deal can be won…' : dailyStatus.completed ? 'Already finished today' : 'Same verified deal for everyone today'}
 						</span>
 						{dailyBest && <span class="mode-best">Best today: {dailyBest.name} — {dailyBest.score}pts</span>}
 					</button>
 
-					<button class="mode-btn random" onClick={() => onStart('random', `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`)}>
+					<button class="mode-btn random" onClick={() => onStart('random', `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`)} disabled={startingMode !== null}>
 						<span class="mode-icon">🎲</span>
 						<span class="mode-title">Random game</span>
-						<span class="mode-desc">Fresh shuffle every time</span>
+						<span class="mode-desc">{startingMode === 'random' ? 'Finding a verified winnable deal…' : 'Fresh verified deal every time'}</span>
 						{bestRandom && <span class="mode-best">Best random: {bestRandom.name} — {bestRandom.score}pts</span>}
 					</button>
 				</div>
+				{startError && <p class="deal-error" role="alert">{startError}</p>}
 
 				{(daily.length > 0 || allTime.length > 0) && (
 					<details class="lb-preview">

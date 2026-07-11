@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'preact/hooks';
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { GameMode, PileLocation } from '@/lib/game/types';
 import { canMoveToFoundation, canMoveToTableau } from '@/lib/game/rules';
 import { todaySeed } from '@/lib/game/seedRng';
@@ -49,6 +49,11 @@ export function App() {
 	const [dropTarget, setDropTarget] = useState<PileLocation | null>(null);
 	const [submittedWinKey, setSubmittedWinKey] = useState('');
 	const [pendingWinSubmit, setPendingWinSubmit] = useState(false);
+	const [startingMode, setStartingMode] = useState<GameMode | null>(null);
+	const [startError, setStartError] = useState('');
+	const [restarting, setRestarting] = useState(false);
+	const startInFlightRef = useRef(false);
+	const restartInFlightRef = useRef(false);
 
 	const foundationTotal = useMemo(() => game.state.foundations.reduce((sum, pile) => sum + pile.length, 0), [game.state.foundations]);
 	const hintedCardId = game.hint?.cardId || null;
@@ -144,35 +149,70 @@ export function App() {
 		} catch {}
 	};
 
-	const startGame = async (mode: GameMode, seed: string) => {
+	const startGame = async (mode: GameMode, seed: string, verifyDeal = true) => {
+		if (startInFlightRef.current || restartInFlightRef.current) return;
+		startInFlightRef.current = true;
+		setStartingMode(mode);
+		setStartError('');
 		let nextMode = mode;
 		let nextSeed = seed;
 		let restarts = 0;
 
-		if (nextMode === 'daily') {
-			const status = await fetchDailyStatus(player, todayDate(), nextSeed);
-			if (status.completed) {
-				nextMode = 'random';
-				nextSeed = randomSeed();
-			} else {
-				try {
-					const res = await fetch('/api/daily-seed', { cache: 'no-store' });
-					const data = await res.json();
-					nextSeed = data.seed ?? nextSeed;
-				} catch {}
+		try {
+			if (nextMode === 'daily') {
+				const status = await fetchDailyStatus(player, todayDate(), nextSeed);
+				if (status.completed) throw new Error('Today’s game is already complete.');
+			}
+
+			if (verifyDeal) {
+				const endpoint = nextMode === 'daily'
+					? '/api/daily-seed'
+					: `/api/random-seed?base=${encodeURIComponent(nextSeed || randomSeed())}`;
+				const res = await fetch(endpoint, { cache: 'no-store' });
+				const data = await res.json() as { seed?: string; verified?: boolean; error?: string };
+				if (!res.ok || !data.seed || data.verified !== true) {
+					throw new Error(data.error || 'No verified deal was available.');
+				}
+				nextSeed = data.seed;
+			}
+
+			if (nextMode === 'daily') {
 				const attempt = await beginDailyAttempt(player, nextSeed);
 				restarts = attempt.restarts;
 				setDailyStatus(attempt);
 			}
-		}
 
-		if (nextMode === 'random') nextSeed ||= randomSeed();
-		game.newGame(game.state.drawMode, nextMode, nextSeed, restarts);
-		setSubmittedWinKey('');
-		setShowModal(false);
+			game.newGame(game.state.drawMode, nextMode, nextSeed, restarts);
+			setSubmittedWinKey('');
+			setShowModal(false);
+		} catch (error) {
+			setStartError(error instanceof Error ? error.message : 'Could not prepare a verified deal.');
+		} finally {
+			startInFlightRef.current = false;
+			setStartingMode(null);
+		}
 	};
 
 	const onNewGame = (mode: GameMode) => startGame(mode, mode === 'daily' ? todaySeed() : randomSeed());
+
+	const restartGame = async () => {
+		if (restartInFlightRef.current || startInFlightRef.current) return;
+		restartInFlightRef.current = true;
+		setRestarting(true);
+		try {
+			let restarts = game.state.dailyRestartCount;
+			if (game.state.mode === 'daily') {
+				const attempt = await beginDailyAttempt(player, game.state.seed);
+				restarts = attempt.restarts;
+				setDailyStatus(attempt);
+			}
+			game.newGame(game.state.drawMode, game.state.mode, game.state.seed, restarts);
+			setSubmittedWinKey('');
+		} finally {
+			restartInFlightRef.current = false;
+			setRestarting(false);
+		}
+	};
 
 	const savePlayerName = (name: string) => {
 		const next = renamePlayer(player, name);
@@ -253,11 +293,12 @@ export function App() {
 
 					<div class="bar-spacer" />
 					<div class="bar-actions">
-						<button class="act-btn fs-btn" title="Fullscreen" onClick={toggleFullscreen}>{isFullscreen ? '⤢' : '⛶'}</button>
-						<button class="act-btn lb-btn" title="Leaderboard" onClick={() => { setShowLeaderboard(true); fetchLeaderboard().then(setEntries); }}>🏆</button>
-						<button class="act-btn hint-btn" title="Hint (H)" onClick={game.showHint} disabled={game.autoCompleting}>?</button>
-						<button class="act-btn undo-btn" title="Undo" disabled={game.undoStack.length === 0} onClick={game.undo}>↶</button>
-						<button class="act-btn new-btn" onClick={() => setShowModal(true)}><span class="btn-label-full">New game</span><span class="btn-label-short">+</span></button>
+						<button class="act-btn fs-btn" title="Fullscreen" aria-label="Toggle fullscreen" onClick={toggleFullscreen}>{isFullscreen ? '⤢' : '⛶'}</button>
+						<button class="act-btn lb-btn" title="Leaderboard" aria-label="Open leaderboard" onClick={() => { setShowLeaderboard(true); fetchLeaderboard().then(setEntries); }}>🏆</button>
+						<button class="act-btn hint-btn" title="Hint (H)" aria-label="Show hint" onClick={game.showHint} disabled={game.autoCompleting}>?</button>
+						<button class="act-btn undo-btn" title="Undo" aria-label="Undo last move" disabled={game.undoStack.length === 0} onClick={game.undo}>↶</button>
+						<button class="act-btn restart-btn" title="Restart this deal" aria-label="Restart this deal" onClick={restartGame} disabled={restarting}>{restarting ? '…' : '↻'}</button>
+						<button class="act-btn new-btn" onClick={() => setShowModal(true)} disabled={restarting}><span class="btn-label-full">New game</span><span class="btn-label-short">+</span></button>
 					</div>
 				</header>
 
@@ -314,7 +355,7 @@ export function App() {
 					</div>
 				)}
 
-				{game.stuck && !game.won && <StuckScreen canUndo={game.undoStack.length > 0} onUndo={game.undo} onNewGame={() => setShowModal(true)} />}
+				{game.stuck && !game.won && <StuckScreen canUndo={game.undoStack.length > 0} restarting={restarting} onUndo={game.undo} onRestart={restartGame} onNewGame={() => setShowModal(true)} />}
 				{game.won && game.state.endTime && (
 					<WinScreen
 						player={player}
@@ -334,12 +375,12 @@ export function App() {
 
 				<footer class="mob-bottom">
 					<button class="mob-btn mob-undo" disabled={game.undoStack.length === 0} onClick={game.undo}>↶ Undo</button>
-					<button class="mob-btn mob-new" onClick={() => setShowModal(true)}>+ New game</button>
+					<button class="mob-btn mob-new" onClick={() => setShowModal(true)} disabled={restarting}>+ New game</button>
 				</footer>
 			</div>
 
-			{showModal && <WelcomeModal player={player} dailyStatus={dailyStatus} entries={entries} onStart={startGame} onRename={() => setShowPlayerModal(true)} />}
-			{showLeaderboard && <LeaderboardModal entries={entries} onClose={() => setShowLeaderboard(false)} onPlaySeed={(seed) => { setShowLeaderboard(false); startGame('random', seed); }} />}
+			{showModal && <WelcomeModal player={player} dailyStatus={dailyStatus} entries={entries} onStart={startGame} onRename={() => setShowPlayerModal(true)} startingMode={startingMode} startError={startError} />}
+			{showLeaderboard && <LeaderboardModal entries={entries} onClose={() => setShowLeaderboard(false)} onPlaySeed={(seed) => { setShowLeaderboard(false); startGame('random', seed, false); }} />}
 			{showPlayerModal && <PlayerNameModal player={player} onSave={savePlayerName} onImport={importPlayer} onClose={() => setShowPlayerModal(false)} />}
 		</>
 	);

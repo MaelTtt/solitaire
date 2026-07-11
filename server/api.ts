@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3';
 import { existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { findSolvableSeed } from '../src/lib/game/solver';
+import { findVerifiedSeed, type VerifiedSeedResult } from '../src/lib/game/solver';
 import { todaySeed } from '../src/lib/game/seedRng';
 
 interface ApiRequest {
@@ -29,8 +29,7 @@ interface LeaderboardBody {
 	streak?: number;
 }
 
-const DATA_DIR = process.env.DATA_DIR ?? 'data';
-const dailySeedCache = new Map<string, string>();
+const dailySeedCache = new Map<string, VerifiedSeedResult>();
 
 export async function handleApiRequest(req: ApiRequest): Promise<ApiResponse> {
 	const url = new URL(req.url, 'http://localhost');
@@ -40,9 +39,18 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResponse> {
 		const date = todaySeed();
 		if (!dailySeedCache.has(date)) {
 			dailySeedCache.clear();
-			dailySeedCache.set(date, findSolvableSeed(date, 1, 80));
+			const deal = findVerifiedSeed(date, 1, 40);
+			if (!deal) return json({ error: 'Could not verify a challenging daily deal. Please try again.' }, 503);
+			dailySeedCache.set(date, deal);
 		}
-		return json({ seed: dailySeedCache.get(date) });
+		return json({ ...dailySeedCache.get(date), verified: true });
+	}
+
+	if (method === 'GET' && url.pathname === '/api/random-seed') {
+		const baseSeed = sanitizeSeed(url.searchParams.get('base') ?? '') || randomSeed();
+		const deal = findVerifiedSeed(baseSeed, 1, 32);
+		if (!deal) return json({ error: 'Could not verify a challenging random deal. Please try again.' }, 503);
+		return json({ ...deal, verified: true });
 	}
 
 	if (method === 'POST' && url.pathname === '/api/player') {
@@ -151,8 +159,9 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResponse> {
 }
 
 function getDb() {
-	if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
-	const db = new Database(join(DATA_DIR, 'leaderboard.db'));
+	const dataDir = process.env.DATA_DIR ?? 'data';
+	if (!existsSync(dataDir)) mkdirSync(dataDir, { recursive: true });
+	const db = new Database(join(dataDir, 'leaderboard.db'));
 	db.exec(`
 		CREATE TABLE IF NOT EXISTS players (
 			player_id TEXT PRIMARY KEY,
@@ -271,6 +280,14 @@ function sanitizeName(name = ''): string {
 
 function sanitizeDate(date: string): string {
 	return /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : todaySeed();
+}
+
+function sanitizeSeed(seed: string): string {
+	return String(seed).replace(/[^a-zA-Z0-9._:-]/g, '').slice(0, 120);
+}
+
+function randomSeed(): string {
+	return `${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
 }
 
 function json(body: unknown, status = 200): ApiResponse {

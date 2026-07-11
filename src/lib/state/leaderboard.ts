@@ -22,7 +22,7 @@ export interface DailyStatus {
 	streak: number;
 }
 
-interface LocalAttempt {
+export interface LocalAttempt {
 	seed: string;
 	started: boolean;
 	completed: boolean;
@@ -102,18 +102,11 @@ export async function beginDailyAttempt(player: PlayerProfile, seed: string, dat
 
 	if (current.completed) return getLocalDailyStatus(player.id, date);
 
-	let shouldNotifyRestart = false;
-	if (current.started) {
-		current.restarts += 1;
-		shouldNotifyRestart = true;
-	} else {
-		current.started = true;
-	}
-	current.seed = seed;
-	attempts[key] = current;
+	const { attempt, isRestart } = advanceDailyAttempt(current, seed);
+	attempts[key] = attempt;
 	saveAttempts(attempts);
 
-	if (shouldNotifyRestart) {
+	if (isRestart) {
 		try {
 			const res = await fetch('/api/daily-restart', {
 				method: 'POST',
@@ -122,13 +115,26 @@ export async function beginDailyAttempt(player: PlayerProfile, seed: string, dat
 			});
 			if (res.ok) {
 				const remote = normalizeStatus((await res.json()) as Partial<DailyStatus>, date);
-				current.restarts = Math.max(current.restarts, remote.restarts);
-				saveAttempts({ ...attempts, [key]: current });
+				attempt.restarts = Math.max(attempt.restarts, remote.restarts);
+				saveAttempts({ ...attempts, [key]: attempt });
 			}
 		} catch {}
 	}
 
 	return getLocalDailyStatus(player.id, date);
+}
+
+export function advanceDailyAttempt(current: LocalAttempt, seed: string): { attempt: LocalAttempt; isRestart: boolean } {
+	const isRestart = current.started && !current.completed && current.seed === seed;
+	return {
+		attempt: {
+			...current,
+			seed,
+			started: true,
+			restarts: current.restarts + (isRestart ? 1 : 0)
+		},
+		isRestart
+	};
 }
 
 export function markLocalDailyCompleted(playerId: string, date = todayDate(), restarts = 0): DailyStatus {
