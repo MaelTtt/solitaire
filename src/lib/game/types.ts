@@ -9,7 +9,7 @@ export interface Card {
 	faceUp: boolean;
 }
 
-export type GameMode = 'daily' | 'random';
+export type GameMode = 'daily' | 'random' | 'duel';
 
 export interface GameState {
 	stock: Card[];

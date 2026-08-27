@@ -8,7 +8,16 @@ const PLAYER_KEY = 'klondike-pl';
 
 const ADJECTIVES = ['Velvet', 'Cosmic', 'Lucky', 'Neon', 'Royal', 'Turbo', 'Mystic', 'Pixel', 'Golden', 'Shadow'];
 const NOUNS = ['Spade', 'Heart', 'Diamond', 'Club', 'Joker', 'Ace', 'King', 'Queen', 'Stack', 'Shuffle'];
-const AVATARS = ['♠', '♥', '♦', '♣', '★', '✦', '✹', '◆'];
+// Préfixe "pixel:" = icône pixel art rendue par <PlayerAvatar> (voir PixelIcon.tsx)
+const AVATARS = ['♠', '♥', '♦', '♣', 'pixel:crown', 'pixel:trophy', 'pixel:fire', 'pixel:sword'];
+
+// Anciens avatars ASCII remplacés par leur équivalent pixel art
+const LEGACY_AVATARS: Record<string, string> = {
+	'★': 'pixel:crown',
+	'✦': 'pixel:trophy',
+	'✹': 'pixel:fire',
+	'◆': 'pixel:sword'
+};
 
 export function getStoredPlayer(): PlayerProfile {
 	if (typeof window === 'undefined') return createPlayer();
@@ -16,7 +25,13 @@ export function getStoredPlayer(): PlayerProfile {
 		const raw = localStorage.getItem(PLAYER_KEY);
 		if (raw) {
 			const parsed = JSON.parse(raw) as PlayerProfile;
-			if (parsed.id && parsed.name) return { ...parsed, name: sanitizePlayerName(parsed.name) };
+			if (parsed.id && parsed.name) {
+				return {
+					...parsed,
+					name: sanitizePlayerName(parsed.name),
+					avatar: LEGACY_AVATARS[parsed.avatar] ?? parsed.avatar
+				};
+			}
 		}
 	} catch {}
 	const player = createPlayer();

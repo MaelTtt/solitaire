@@ -3,11 +3,12 @@ import { readFile } from 'node:fs/promises';
 import { dirname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { handleApiRequest } from './api';
+import { setupRooms } from './rooms';
 
 const PORT = Number(process.env.PORT ?? 3000);
 const BUILD_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'build');
 
-createServer(async (request, response) => {
+const server = createServer(async (request, response) => {
 	try {
 		const url = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`);
 
@@ -28,7 +29,10 @@ createServer(async (request, response) => {
 	} catch (error) {
 		sendJson(response, 500, { error: error instanceof Error ? error.message : 'server error' });
 	}
-}).listen(PORT);
+});
+
+setupRooms(server);
+server.listen(PORT);
 
 console.log(`Solitaire running on http://localhost:${PORT}`);
 

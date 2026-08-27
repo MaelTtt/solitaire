@@ -17,7 +17,12 @@ import {
 } from '@/lib/state/leaderboard';
 import { useDragState } from '@/lib/ui/drag';
 import { useScreenMetrics } from '@/lib/ui/screen';
+import { useDuel, type DuelFoundationTop } from '@/lib/state/duel';
 import { CardStack } from '@/components/CardStack';
+import { CountdownOverlay, OpponentsRail } from '@/components/DuelWidgets';
+import { DuelModal } from '@/components/DuelModal';
+import { DuelResultModal } from '@/components/DuelResultModal';
+import { PixelIcon, PlayerAvatar } from '@/components/PixelIcon';
 import { FoundationPile } from '@/components/FoundationPile';
 import { LeaderboardModal } from '@/components/LeaderboardModal';
 import { PlayerNameModal } from '@/components/PlayerNameModal';
@@ -29,8 +34,9 @@ import { WastePile } from '@/components/WastePile';
 import { WelcomeModal } from '@/components/WelcomeModal';
 import { WinScreen } from '@/components/WinScreen';
 
-const SUITS = ['♠', '♥', '♦', '♣'] as const;
 const SUIT_COLORS = ['#c8b8ff', '#ff6b8a', '#ffaa55', '#6bdd8a'] as const;
+const SUITS = ['♠', '♥', '♦', '♣'] as const;
+const SUIT_ICONS = ['spade', 'heart', 'diamond', 'club'] as const;
 
 export function App() {
 	const game = useGame();
@@ -39,6 +45,14 @@ export function App() {
 	const { drag } = dragApi;
 
 	const [player, setPlayer] = useState<PlayerProfile>(() => getStoredPlayer());
+	const duel = useDuel(player);
+	const [showDuel, setShowDuel] = useState(false);
+
+	// Ouvre le socket dès l'écran d'accueil duel : le bouton « Créer » est actif immédiatement
+	useEffect(() => {
+		if (showDuel || duel.phase !== 'idle') duel.ensureConnected();
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [showDuel, duel.phase]);
 	const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
 	const [dailyStatus, setDailyStatus] = useState<DailyStatus>(() => getLocalDailyStatus(getStoredPlayer().id));
 	const [showModal, setShowModal] = useState(!game.loadedSaved);
@@ -51,6 +65,7 @@ export function App() {
 	const [pendingWinSubmit, setPendingWinSubmit] = useState(false);
 	const [startingMode, setStartingMode] = useState<GameMode | null>(null);
 	const [startError, setStartError] = useState('');
+	const [dealDifficulty, setDealDifficulty] = useState('');
 	const [restarting, setRestarting] = useState(false);
 	const startInFlightRef = useRef(false);
 	const restartInFlightRef = useRef(false);
@@ -59,6 +74,29 @@ export function App() {
 	const hintedCardId = game.hint?.cardId || null;
 	const hintStock = game.hint?.from.type === 'stock';
 	const finalScore = game.won ? game.getFinalScore() : 0;
+	const inDuel = game.state.mode === 'duel' && duel.phase === 'playing';
+
+	// Démarre la partie locale quand la salle distribue sa seed
+	useEffect(() => {
+		if (duel.phase === 'playing' && duel.startInfo?.seed) {
+			game.newGame(1, 'duel', duel.startInfo.seed, 0);
+		}
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [duel.phase, duel.startInfo?.seed]);
+
+	// Ping de progression vers la salle (throttlé dans useDuel)
+	useEffect(() => {
+		if (!inDuel) return;
+		const tops: DuelFoundationTop[] = [];
+		let count = 0;
+		for (const pile of game.state.foundations) {
+			const top = pile[pile.length - 1];
+			if (top) tops.push({ suit: top.suit, rank: top.rank });
+			count += pile.length;
+		}
+		duel.sendProgress(tops, count, game.state.score);
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [inDuel, game.state.foundations, game.state.score]);
 
 	useEffect(() => {
 		registerPlayer(player);
@@ -83,7 +121,7 @@ export function App() {
 
 	useEffect(() => {
 		const onKeydown = (event: KeyboardEvent) => {
-			if (event.key === 'n' || event.key === 'N') setShowModal(true);
+			if ((event.key === 'n' || event.key === 'N') && game.state.mode !== 'duel') setShowModal(true);
 			if ((event.ctrlKey || event.metaKey) && event.key === 'z') game.undo();
 			if ((event.key === 'h' || event.key === 'H') && !event.repeat) game.showHint();
 		};
@@ -93,6 +131,10 @@ export function App() {
 
 	useEffect(() => {
 		if (!game.won || !game.state.endTime) return;
+		if (game.state.mode === 'duel') {
+			if (duel.phase === 'playing') duel.sendFinished(finalScore, game.state.moves);
+			return;
+		}
 		if (isDefaultName(player.name)) {
 			setPendingWinSubmit(true);
 			setShowPlayerModal(true);
@@ -169,11 +211,12 @@ export function App() {
 					? '/api/daily-seed'
 					: `/api/random-seed?base=${encodeURIComponent(nextSeed || randomSeed())}`;
 				const res = await fetch(endpoint, { cache: 'no-store' });
-				const data = await res.json() as { seed?: string; verified?: boolean; error?: string };
+				const data = await res.json() as { seed?: string; verified?: boolean; error?: string; difficulty?: string };
 				if (!res.ok || !data.seed || data.verified !== true) {
 					throw new Error(data.error || 'No verified deal was available.');
 				}
 				nextSeed = data.seed;
+				setDealDifficulty(data.difficulty ?? '');
 			}
 
 			if (nextMode === 'daily') {
@@ -196,7 +239,7 @@ export function App() {
 	const onNewGame = (mode: GameMode) => startGame(mode, mode === 'daily' ? todaySeed() : randomSeed());
 
 	const restartGame = async () => {
-		if (restartInFlightRef.current || startInFlightRef.current) return;
+		if (restartInFlightRef.current || startInFlightRef.current || game.state.mode === 'duel') return;
 		restartInFlightRef.current = true;
 		setRestarting(true);
 		try {
@@ -266,13 +309,22 @@ export function App() {
 			<VortexBackground />
 			<div class="root" onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={() => { setDropTarget(null); dragApi.end(); }}>
 				<header class="top-bar">
-					<div class="bar-logo">♠</div>
+					<div class="bar-logo"><PixelIcon name="spade" size={18} /></div>
 					<div class="bar-sep" />
-					<div class={`mode-badge ${game.state.mode === 'daily' ? 'daily' : ''}`}>{game.state.mode === 'daily' ? 'Daily' : 'Random'}</div>
+					<div class={`mode-badge ${game.state.mode === 'daily' ? 'daily' : ''}`}>
+						{game.state.mode === 'daily' ? 'Daily' : game.state.mode === 'duel' ? 'Duel' : 'Random'}
+					</div>
+					{(() => {
+						const difficulty = game.state.mode === 'duel'
+							? duel.startInfo?.difficulty || duel.room?.difficulty || ''
+							: dealDifficulty;
+						if (!difficulty) return null;
+						return <span class={`top-difficulty diff-${difficulty}`}>{capFirst(difficulty)}</span>;
+					})()}
 					<button class="top-player" onClick={() => setShowPlayerModal(true)} title="Player card">
-						<span>{player.avatar}</span>
+						<PlayerAvatar avatar={player.avatar} size={15} />
 						<strong>{player.name}</strong>
-						<em>🔥 {dailyStatus.streak}</em>
+						<em class="top-streak"><PixelIcon name="fire" size={12} /> {dailyStatus.streak}</em>
 					</button>
 					<div class="bar-sep" />
 
@@ -280,29 +332,31 @@ export function App() {
 						<div class="bar-stat"><span class="bar-lbl">SCORE</span><span class="bar-val">{game.state.score}</span></div>
 						<div class="bar-stat"><span class="bar-lbl">MOVES</span><span class="bar-val">{game.state.moves}</span></div>
 						<div class="bar-stat"><span class="bar-lbl">TIME</span><span class="bar-val">{fmtTime(elapsed)}</span></div>
-						{game.state.mode === 'daily' && <div class="bar-stat restarts-stat"><span class="bar-lbl">RESTARTS</span><span class="bar-val">↻ {game.state.dailyRestartCount}</span></div>}
+						{game.state.mode === 'daily' && <div class="bar-stat restarts-stat"><span class="bar-lbl">RESTARTS</span><span class="bar-val"><PixelIcon name="reload" size={11} /> {game.state.dailyRestartCount}</span></div>}
 					</div>
 
 					<div class="bar-sep" />
 					<div class="bar-progress-widget">
 						<div class="bar-suits">
-							{game.state.foundations.map((pile, i) => <div class="bar-suit" style={`color:${SUIT_COLORS[i]}`} key={SUITS[i]}>{SUITS[i]}<span>{pile.length}</span></div>)}
+							{game.state.foundations.map((pile, i) => <div class="bar-suit" style={`color:${SUIT_COLORS[i]}`} key={SUITS[i]}><PixelIcon name={SUIT_ICONS[i]} size={12} /><span>{pile.length}</span></div>)}
 						</div>
 						<div class="found-bar"><div class="found-fill" style={`width:${(foundationTotal / 52) * 100}%`} /></div>
 					</div>
 
 					<div class="bar-spacer" />
 					<div class="bar-actions">
-						<button class="act-btn fs-btn" title="Fullscreen" aria-label="Toggle fullscreen" onClick={toggleFullscreen}>{isFullscreen ? '⤢' : '⛶'}</button>
-						<button class="act-btn lb-btn" title="Leaderboard" aria-label="Open leaderboard" onClick={() => { setShowLeaderboard(true); fetchLeaderboard().then(setEntries); }}>🏆</button>
-						<button class="act-btn hint-btn" title="Hint (H)" aria-label="Show hint" onClick={game.showHint} disabled={game.autoCompleting}>?</button>
-						<button class="act-btn undo-btn" title="Undo" aria-label="Undo last move" disabled={game.undoStack.length === 0} onClick={game.undo}>↶</button>
-						<button class="act-btn restart-btn" title="Restart this deal" aria-label="Restart this deal" onClick={restartGame} disabled={restarting}>{restarting ? '…' : '↻'}</button>
-						<button class="act-btn new-btn" onClick={() => setShowModal(true)} disabled={restarting}><span class="btn-label-full">New game</span><span class="btn-label-short">+</span></button>
+						<button class="act-btn fs-btn" title="Fullscreen" aria-label="Toggle fullscreen" onClick={toggleFullscreen}><PixelIcon name="expand" size={14} /></button>
+						<button class="act-btn lb-btn" title="Leaderboard" aria-label="Open leaderboard" onClick={() => { setShowLeaderboard(true); fetchLeaderboard().then(setEntries); }}><PixelIcon name="trophy" size={14} /></button>
+						<button class="act-btn hint-btn" title="Hint (H)" aria-label="Show hint" onClick={game.showHint} disabled={game.autoCompleting}><PixelIcon name="lightbulb" size={14} /></button>
+						<button class="act-btn undo-btn" title="Undo" aria-label="Undo last move" disabled={game.undoStack.length === 0} onClick={game.undo}><PixelIcon name="undo" size={14} /></button>
+						<button class="act-btn restart-btn" title="Restart this deal" aria-label="Restart this deal" onClick={restartGame} disabled={restarting || game.state.mode === 'duel'}>{restarting ? '…' : <PixelIcon name="reload" size={14} />}</button>
+						<button class="act-btn new-btn" onClick={() => setShowModal(true)} disabled={restarting || game.state.mode === 'duel'}><span class="btn-label-full">New game</span><span class="btn-label-short"><PixelIcon name="plus" size={14} /></span></button>
 					</div>
 				</header>
 
 				{game.hint && <div class="hint-toast">{game.hint.message}</div>}
+
+				{duel.phase === 'countdown' && <CountdownOverlay endsAt={duel.countdownEndsAt} />}
 
 				<div class="board-wrap">
 					<main class="board">
@@ -347,6 +401,17 @@ export function App() {
 							))}
 						</section>
 					</main>
+
+					{inDuel && (
+						<OpponentsRail
+							opponents={duel.opponents.filter((entry) => entry.id !== player.id)}
+							onQuit={() => {
+								if (!window.confirm('Quitter le duel ? Ce sera compté comme un forfait (-20 trophées).')) return;
+								duel.leave();
+								setShowModal(true);
+							}}
+						/>
+					)}
 				</div>
 
 				{drag.active && drag.cards.length > 0 && (
@@ -374,12 +439,41 @@ export function App() {
 				)}
 
 				<footer class="mob-bottom">
-					<button class="mob-btn mob-undo" disabled={game.undoStack.length === 0} onClick={game.undo}>↶ Undo</button>
-					<button class="mob-btn mob-new" onClick={() => setShowModal(true)} disabled={restarting}>+ New game</button>
+					<button class="mob-btn mob-undo" disabled={game.undoStack.length === 0} onClick={game.undo}><PixelIcon name="undo" size={14} /> Undo</button>
+					<button class="mob-btn mob-new" onClick={() => setShowModal(true)} disabled={restarting || game.state.mode === 'duel'}><PixelIcon name="plus" size={14} /> New game</button>
 				</footer>
 			</div>
 
-			{showModal && <WelcomeModal player={player} dailyStatus={dailyStatus} entries={entries} onStart={startGame} onRename={() => setShowPlayerModal(true)} startingMode={startingMode} startError={startError} />}
+			{showModal && <WelcomeModal player={player} dailyStatus={dailyStatus} entries={entries} onStart={startGame} onDuels={() => { setShowModal(false); setShowDuel(true); }} onRename={() => setShowPlayerModal(true)} startingMode={startingMode} startError={startError} />}
+			{showDuel && (
+				<DuelModal
+					player={player}
+					phase={duel.phase}
+					room={duel.room}
+					result={duel.result}
+					error={duel.error}
+					connected={duel.connected}
+					isHost={duel.isHost}
+					onCreate={duel.createRoom}
+					onJoin={duel.joinRoom}
+					onSetReady={duel.setReady}
+					onSetDifficulty={duel.setDifficulty}
+					onStart={duel.start}
+					onLeave={() => { duel.leave(); setShowDuel(false); }}
+					onClose={() => setShowDuel(false)}
+				/>
+			)}
+			{duel.phase === 'result' && duel.result && (
+				<DuelResultModal
+					result={duel.result}
+					playerId={player.id}
+					onRematch={() => {
+						if (duel.result?.roomCode) duel.rematch(duel.result.roomCode);
+						setShowDuel(true);
+					}}
+					onClose={() => { duel.leave(); }}
+				/>
+			)}
 			{showLeaderboard && <LeaderboardModal entries={entries} onClose={() => setShowLeaderboard(false)} onPlaySeed={(seed) => { setShowLeaderboard(false); startGame('random', seed, false); }} />}
 			{showPlayerModal && <PlayerNameModal player={player} onSave={savePlayerName} onImport={importPlayer} onClose={() => setShowPlayerModal(false)} />}
 		</>
@@ -388,4 +482,9 @@ export function App() {
 
 function randomSeed(): string {
 	return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function capFirst(value: string | undefined): string {
+	if (!value) return '';
+	return value.charAt(0).toUpperCase() + value.slice(1);
 }

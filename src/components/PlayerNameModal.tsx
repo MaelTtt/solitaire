@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'preact/hooks';
 import { exportPlayerCode, importPlayerCode, type PlayerProfile } from '@/lib/state/player';
+import { PlayerAvatar } from './PixelIcon';
 
 interface PlayerNameModalProps {
 	player: PlayerProfile;
@@ -42,7 +43,7 @@ export function PlayerNameModal({ player, onSave, onImport, onClose }: PlayerNam
 				<div class="title">Your player card</div>
 				<p class="sub">No password: this browser keeps your private player card and uses it for streaks and scores.</p>
 				<div class="player-card big">
-					<span class="player-avatar">{player.avatar}</span>
+					<span class="player-avatar"><PlayerAvatar avatar={player.avatar} size={20} /></span>
 					<span class="player-id">#{player.id.slice(0, 8)}</span>
 				</div>
 				<input

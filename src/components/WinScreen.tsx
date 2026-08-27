@@ -2,6 +2,7 @@ import type { GameMode } from '@/lib/game/types';
 import type { PlayerProfile } from '@/lib/state/player';
 import type { LeaderboardEntry } from '@/lib/state/leaderboard';
 import { allTimeRows, dailyRows, fmtTime, todayDate } from '@/lib/state/leaderboard';
+import { PixelIcon, PlayerAvatar } from './PixelIcon';
 
 interface WinScreenProps {
 	player: PlayerProfile;
@@ -28,7 +29,7 @@ export function WinScreen({ player, finalScore, moves, startTime, endTime, mode,
 				<div class="title">Won</div>
 				<div class="submitted-line">
 					<span>{submitted ? 'Score saved for' : 'Saving score for'}</span>
-					<button onClick={onRename}>{player.avatar} {player.name}</button>
+					<button onClick={onRename}><PlayerAvatar avatar={player.avatar} size={12} /> {player.name}</button>
 				</div>
 
 				<div class="stats">
@@ -36,8 +37,8 @@ export function WinScreen({ player, finalScore, moves, startTime, endTime, mode,
 					<div class="stat-row"><span>Moves</span><span class="val">{moves}</span></div>
 					<div class="stat-row"><span>Time</span><span class="val">{fmtTime(elapsed)}</span></div>
 					<div class="stat-row"><span>Mode</span><span class="val">{mode === 'daily' ? 'Daily' : 'Random'}</span></div>
-					{mode === 'daily' && <div class="stat-row"><span>Restarts</span><span class="val">↻ {restarts}</span></div>}
-					{mode === 'daily' && <div class="stat-row"><span>Streak</span><span class="val">🔥 {streak}</span></div>}
+					{mode === 'daily' && <div class="stat-row"><span>Restarts</span><span class="val"><PixelIcon name="reload" size={12} /> {restarts}</span></div>}
+					{mode === 'daily' && <div class="stat-row"><span>Streak</span><span class="val"><PixelIcon name="fire" size={12} /> {streak}</span></div>}
 				</div>
 
 				<div class="lb-panel">
@@ -48,7 +49,7 @@ export function WinScreen({ player, finalScore, moves, startTime, endTime, mode,
 							<span class="lb-name">{entry.name}</span>
 							<span class="lb-score">{entry.score}</span>
 							<span class="lb-time">{fmtTime(entry.timeSeconds)}</span>
-							{mode === 'daily' && <span class="lb-restarts">↻ {entry.restarts}</span>}
+							{mode === 'daily' && <span class="lb-restarts"><PixelIcon name="reload" size={10} /> {entry.restarts}</span>}
 						</div>
 					))}
 				</div>

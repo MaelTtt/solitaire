@@ -329,6 +329,11 @@ function loadInitialGame(): InitialGame {
 			localStorage.removeItem(SAVE_KEY);
 			return { state: dealState(), won: false, stuck: false, loaded: false };
 		}
+		if (saved.state.mode === 'duel') {
+			// Une partie de duel ne se reprend pas : elle vit dans sa salle
+			localStorage.removeItem(SAVE_KEY);
+			return { state: dealState(), won: false, stuck: false, loaded: false };
+		}
 		if (saved.state.mode === 'daily' && !matchesSeedBase(saved.state.seed, todaySeed())) {
 			localStorage.removeItem(SAVE_KEY);
 			return { state: dealState(), won: false, stuck: false, loaded: false };

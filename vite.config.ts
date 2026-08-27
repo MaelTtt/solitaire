@@ -24,6 +24,9 @@ function apiPlugin(): Plugin {
 	return {
 		name: 'solitaire-api',
 		configureServer(server) {
+			// Salles de duel : WebSocket monté sur le serveur HTTP de Vite en dev
+			const httpServer = server.httpServer;
+			if (httpServer) import('./server/rooms').then(({ setupRooms }) => setupRooms(httpServer as import('node:http').Server));
 			server.middlewares.use(async (req, res, next) => {
 				if (!req.url?.startsWith('/api/')) return next();
 				try {

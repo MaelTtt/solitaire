@@ -1,8 +1,9 @@
 import Database from 'better-sqlite3';
 import { existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { findVerifiedSeed, type VerifiedSeedResult } from '../src/lib/game/solver';
+import { findDuelSeed, findVerifiedSeed, difficultyLabel, type VerifiedSeedResult } from '../src/lib/game/solver';
 import { todaySeed } from '../src/lib/game/seedRng';
+import { awardDailyBonus, ensureTrophyTables, getDuelHistory, getSharedDb, getTrophiesLeaderboard, getTrophyProfile } from './trophies';
 
 interface ApiRequest {
 	method: string;
@@ -31,6 +32,15 @@ interface LeaderboardBody {
 
 const dailySeedCache = new Map<string, VerifiedSeedResult>();
 
+/** Enrichit un deal vérifié avec la difficulté estimée pour un humain. */
+function dealPayload(deal: VerifiedSeedResult & { forgiveness?: number }) {
+	return {
+		...deal,
+		verified: true,
+		difficulty: difficultyLabel((deal as { forgiveness?: number }).forgiveness ?? 0)
+	};
+}
+
 export async function handleApiRequest(req: ApiRequest): Promise<ApiResponse> {
 	const url = new URL(req.url, 'http://localhost');
 	const method = req.method.toUpperCase();
@@ -39,18 +49,22 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResponse> {
 		const date = todaySeed();
 		if (!dailySeedCache.has(date)) {
 			dailySeedCache.clear();
-			const deal = findVerifiedSeed(date, 1, 40);
+			// Calculé une fois par jour : on peut se permettre une recherche généreuse
+			// (gagnable ET pardonnant, pour que tout le monde puisse tenir son streak)
+			const deal = findDuelSeed(date, 1, 24, { maxVisitedStates: 40000, rollouts: 48, minWinRate: 0.12 })
+				?? findVerifiedSeed(date, 1, 40);
 			if (!deal) return json({ error: 'Could not verify a challenging daily deal. Please try again.' }, 503);
 			dailySeedCache.set(date, deal);
 		}
-		return json({ ...dailySeedCache.get(date), verified: true });
+		return json(dealPayload(dailySeedCache.get(date)!));
 	}
 
 	if (method === 'GET' && url.pathname === '/api/random-seed') {
 		const baseSeed = sanitizeSeed(url.searchParams.get('base') ?? '') || randomSeed();
-		const deal = findVerifiedSeed(baseSeed, 1, 32);
+		const deal = findDuelSeed(baseSeed, 1, 12, { maxVisitedStates: 30000, rollouts: 36, minWinRate: 0.12 })
+			?? findVerifiedSeed(baseSeed, 1, 32);
 		if (!deal) return json({ error: 'Could not verify a challenging random deal. Please try again.' }, 503);
-		return json({ ...deal, verified: true });
+		return json(dealPayload(deal));
 	}
 
 	if (method === 'POST' && url.pathname === '/api/player') {
@@ -96,6 +110,29 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResponse> {
 		const next = getDailyStatus(db, playerId, date);
 		db.close();
 		return json(next);
+	}
+
+	if (method === 'GET' && url.pathname === '/api/player-trophies') {
+		const playerId = sanitizeId(url.searchParams.get('playerId') ?? '');
+		if (!playerId) return json({ error: 'missing playerId' }, 400);
+		const db = getSharedDb();
+		ensureTrophyTables(db);
+		return json(getTrophyProfile(db, playerId) ?? { playerId, name: '', trophies: 0, bestTrophies: 0, duelsPlayed: 0, duelWins: 0, league: 'Bois' });
+	}
+
+	if (method === 'GET' && url.pathname === '/api/trophies-all') {
+		const db = getSharedDb();
+		ensureTrophyTables(db);
+		return json(getTrophiesLeaderboard(db, 50));
+	}
+
+	if (method === 'GET' && url.pathname === '/api/duel-history') {
+		const playerId = sanitizeId(url.searchParams.get('playerId') ?? '');
+		if (!playerId) return json({ error: 'missing playerId' }, 400);
+		const limit = Number(url.searchParams.get('limit') ?? 20);
+		const db = getSharedDb();
+		ensureTrophyTables(db);
+		return json(getDuelHistory(db, playerId, Number.isFinite(limit) ? limit : 20));
 	}
 
 	if (method === 'GET' && url.pathname === '/api/leaderboard') {
@@ -145,6 +182,7 @@ export async function handleApiRequest(req: ApiRequest): Promise<ApiResponse> {
 			db.prepare(`
 				UPDATE daily_attempts SET completed_at = datetime('now'), restarts = ? WHERE player_id = ? AND date = ?
 			`).run(restarts, playerId, date);
+			awardDailyBonus(db, playerId, name, date); // +10 trophées, une fois par jour
 		}
 
 		db.prepare(`

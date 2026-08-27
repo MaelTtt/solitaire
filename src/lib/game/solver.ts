@@ -153,7 +153,7 @@ export function findVerifiedSeed(baseSeed: string, drawMode: 1 | 3 = 1, maxAttem
 					solutionMoves: result.moveCount,
 					exploredStates: result.exploredStates
 				};
-				if (!best || candidate.difficulty > best.difficulty) best = candidate;
+					if (!best || candidate.difficulty > best.difficulty) best = candidate;
 			}
 		}
 		if (attempt >= 7 && best && best.exploredStates >= 500) break;
@@ -161,6 +161,252 @@ export function findVerifiedSeed(baseSeed: string, drawMode: 1 | 3 = 1, maxAttem
 
 	return best;
 }
+
+/* ==========================================================================
+ * Duels : deals certifiés gagnables ET « pardonnants ».
+ *
+ * Un deal peut être mathématiquement solvable tout en étant quasi injouable
+ * pour un humain (une seule ligne gagnante, erreurs non réversibles). Pour
+ * les duels on exige donc en plus que des simulations avec une politique
+ * gloutonne légèrement aléatoire gagnent une fraction des parties —
+ * c'est la meilleure approximation bon marché de la jouabilité humaine.
+ * ========================================================================== */
+
+export interface DuelSeedResult extends VerifiedSeedResult {
+	/** Taux de victoire des simulations gloutonnes (0-1), mesure de pardonabilité. */
+	forgiveness: number;
+}
+
+export interface ForgivenessResult {
+	won: boolean;
+	foundations: number;
+}
+
+/** Simule une partie avec une politique gloutonne + aléa ; retourne le résultat. */
+export function simulateGreedyGame(initial: GameState, maxRecycles = 4): ForgivenessResult {
+	let state = cloneSearchState(initial);
+	let recycles = 0;
+
+	for (let step = 0; step < 500; step++) {
+		if (isWonSearch(state)) return { won: true, foundations: 52 };
+
+		const safe = findForcedSafeMove(state);
+		if (safe) {
+			const applied = applyMove(state, safe);
+			if (!applied) break;
+			state = applied;
+			continue;
+		}
+
+		const moves = rolloutMoves(state);
+		if (moves.length > 0) {
+			const pick = weightedPick(moves);
+			let applied: SearchState | null;
+			if (pick.from.type === 'stock') {
+				// Tirage réaliste : la carte du dessus du stock passe à la défausse
+				const card = state.stock.pop();
+				if (!card) break;
+				card.faceUp = true;
+				state.waste.push(card);
+				applied = state;
+			} else {
+				applied = applyMove(state, pick);
+			}
+			if (!applied) break;
+			state = applied;
+			continue;
+		}
+
+		// Plus de coup : recycle si possible (stock vide, waste non vide)
+		if (state.stock.length === 0 && state.waste.length > 0 && recycles < maxRecycles) {
+			state.stock = state.waste.reverse().map((card) => ({ ...card, faceUp: false }));
+			state.waste = [];
+			recycles++;
+			continue;
+		}
+		break;
+	}
+
+	return { won: false, foundations: state.foundations.reduce((sum, pile) => sum + pile.length, 0) };
+}
+
+/** Estime la pardonabilité d'un deal : taux de victoires sur N simulations gloutonnes. */
+export function estimateForgiveness(state: GameState, rollouts = 40, maxRecycles = 4): number {
+	if (rollouts <= 0) return 0;
+	let wins = 0;
+	for (let i = 0; i < rollouts; i++) {
+		if (simulateGreedyGame(state, maxRecycles).won) wins++;
+	}
+	return wins / rollouts;
+}
+
+export type DifficultyLabel = 'facile' | 'moyen' | 'difficile';
+
+/**
+ * Difficulté estimée pour un humain, déduite de la pardonabilité :
+ * un joueur correct gagne souvent sur « facile », rarement sur « difficile ».
+ */
+export function difficultyLabel(forgiveness: number): DifficultyLabel {
+	if (forgiveness >= 0.45) return 'facile';
+	if (forgiveness >= 0.2) return 'moyen';
+	return 'difficile';
+}
+
+/**
+ * Trouve un seed de duel : solvable (gros budget) ET pardonnable (simulations).
+ * `target` permet de viser une difficulté précise (facile/moyen/difficile) ;
+ * sans correspondance, renvoie le meilleur deal solvable trouvé.
+ */
+export function findDuelSeed(
+	baseSeed: string,
+	drawMode: 1 | 3 = 1,
+	maxAttempts = 16,
+	options: {
+		maxVisitedStates?: number;
+		rollouts?: number;
+		minWinRate?: number;
+		target?: 'facile' | 'moyen' | 'difficile';
+	} = {}
+): DuelSeedResult | null {
+	const maxVisitedStates = options.maxVisitedStates ?? 30000;
+	const rollouts = options.rollouts ?? 36;
+	const minWinRate = options.minWinRate ?? 0.12;
+	const target = options.target;
+	let bestSolvable: DuelSeedResult | null = null;
+	let bestForgiving: DuelSeedResult | null = null;
+	let bestMatch: DuelSeedResult | null = null;
+
+	const matchesTarget = (f: number): boolean => {
+		if (target === 'facile') return f >= 0.45;
+		if (target === 'moyen') return f >= 0.2 && f < 0.45;
+		if (target === 'difficile') return f < 0.2;
+		return false;
+	};
+
+	for (let attempt = 0; attempt < maxAttempts; attempt++) {
+		const shuffleSeed = `${baseSeed}#${attempt}`;
+		const seed = `${VERIFIED_V3_SEED_PREFIX}${shuffleSeed}`;
+		const state = dealSeededState(drawMode, 'random', seed);
+		const result = solveKlondike(state, { maxVisitedStates });
+		if (!result.solved) continue;
+
+		const forgiveness = estimateForgiveness(state, rollouts);
+		const candidate: DuelSeedResult = {
+			seed,
+			difficulty: result.moveCount,
+			solutionMoves: result.moveCount,
+			exploredStates: result.exploredStates,
+			forgiveness
+		};
+		if (!bestSolvable) bestSolvable = candidate;
+		if (!bestForgiving || forgiveness > bestForgiving.forgiveness) bestForgiving = candidate;
+		if (matchesTarget(forgiveness) && (!bestMatch || (target === 'difficile' ? forgiveness < bestMatch.forgiveness : forgiveness > bestMatch.forgiveness))) {
+			bestMatch = candidate;
+		}
+		if (bestMatch && attempt >= 3) break;
+	}
+
+	if (bestMatch) return bestMatch;
+	return bestForgiving && bestForgiving.forgiveness >= minWinRate ? bestForgiving : bestSolvable;
+}
+
+/* --- moteur de simulation --- */
+
+function isWonSearch(state: SearchState): boolean {
+	return state.foundations.every((pile) => pile.length === 13);
+}
+
+/** Coup de fondation « sûr » (ne ferme aucune option) : à jouer sans hésiter. */
+function findForcedSafeMove(state: SearchState): Move | null {
+	const consider = (card: Card, from: PileLocation): Move | null => {
+		const foundationIndex = findFoundationIndex(card, state as GameState);
+		if (foundationIndex < 0) return null;
+		if (!canSafelyMoveToFoundation(card, state)) return null;
+		return { from, to: { type: 'foundation', index: foundationIndex }, cardId: card.id, priority: 100 };
+	};
+
+	const wasteCard = state.waste[state.waste.length - 1];
+	if (wasteCard) {
+		const move = consider(wasteCard, { type: 'waste', index: 0 });
+		if (move) return move;
+	}
+
+	for (let i = 0; i < 7; i++) {
+		const pile = state.tableau[i];
+		const top = pile[pile.length - 1];
+		if (top?.faceUp) {
+			const move = consider(top, { type: 'tableau', index: i });
+			if (move) return move;
+		}
+	}
+	return null;
+}
+
+/** Coups « réalistes » pour un joueur : accès au stock limité à la carte du dessus. */
+function rolloutMoves(state: SearchState): Move[] {
+	const moves: Move[] = [];
+	const wasteCard = state.waste[state.waste.length - 1];
+
+	if (wasteCard) {
+		const foundationIndex = findFoundationIndex(wasteCard, state as GameState);
+		if (foundationIndex >= 0) {
+			moves.push({ from: { type: 'waste', index: 0 }, to: { type: 'foundation', index: foundationIndex }, priority: 3 });
+		}
+		for (let i = 0; i < 7; i++) {
+			if (canMoveToTableau(wasteCard, state.tableau[i])) {
+				moves.push({ from: { type: 'waste', index: 0 }, to: { type: 'tableau', index: i }, priority: state.tableau[i].length === 0 ? 2 : 7 });
+			}
+		}
+	}
+
+	for (let i = 0; i < 7; i++) {
+		const pile = state.tableau[i];
+		if (pile.length === 0) continue;
+		const firstFaceUp = pile.findIndex((card) => card.faceUp);
+		if (firstFaceUp < 0) continue;
+
+		// Déplacement de la séquence face visible vers une autre colonne
+		const movingCard = pile[firstFaceUp];
+		for (let j = 0; j < 7; j++) {
+			if (i === j || !canMoveToTableau(movingCard, state.tableau[j])) continue;
+			// Bonus si ça retourne une carte cachée ; malus si on vide juste vers une case vide
+			const reveals = firstFaceUp > 0 && !pile[firstFaceUp - 1].faceUp;
+			const toEmpty = state.tableau[j].length === 0;
+			const priority = reveals && !toEmpty ? 9 : reveals ? 6 : toEmpty ? 1 : 2;
+			moves.push({ from: { type: 'tableau', index: i }, to: { type: 'tableau', index: j }, cardId: movingCard.id, priority });
+		}
+
+		// Carte du haut vers une fondation (non sûr) — via une autre colonne si nécessaire
+		const top = pile[pile.length - 1];
+		if (top) {
+			const foundationIndex = findFoundationIndex(top, state as GameState);
+			if (foundationIndex >= 0) {
+				moves.push({ from: { type: 'tableau', index: i }, to: { type: 'foundation', index: foundationIndex }, cardId: top.id, priority: 3 });
+			}
+		}
+	}
+
+	// Pioche réaliste : uniquement la carte du dessus du stock (traitée à part dans la boucle)
+	const stockTop = state.stock[state.stock.length - 1];
+	if (stockTop) {
+		moves.push({ from: { type: 'stock', index: 0 }, to: { type: 'stock', index: 0 }, cardId: stockTop.id, priority: 4 });
+	}
+
+	return moves;
+}
+
+function weightedPick(moves: Move[]): Move {
+	const total = moves.reduce((sum, move) => sum + Math.max(1, move.priority), 0);
+	let roll = Math.random() * total;
+	for (const move of moves) {
+		roll -= Math.max(1, move.priority);
+		if (roll <= 0) return move;
+	}
+	return moves[moves.length - 1];
+}
+
+/** @internal debug uniquement */
+export const __solverInternals = { findForcedSafeMove, rolloutMoves, applyMove, weightedPick, cloneSearchState, isWonSearch, canSafelyMoveToFoundation, findFoundationIndex };
 
 export function matchesSeedBase(seed: string, baseSeed: string): boolean {
 	return seed === baseSeed ||

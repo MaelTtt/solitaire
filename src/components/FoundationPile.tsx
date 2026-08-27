@@ -2,6 +2,7 @@ import type { JSX } from 'preact';
 import type { Card as CardModel, PileLocation } from '@/lib/game/types';
 import type { DragState } from '@/lib/ui/drag';
 import { Card } from './Card';
+import { PixelIcon, type PixelIconName } from './PixelIcon';
 
 interface FoundationPileProps {
 	cards: CardModel[];
@@ -11,7 +12,7 @@ interface FoundationPileProps {
 	onStartDrag: (cards: CardModel[], from: PileLocation, x: number, y: number) => void;
 }
 
-const SUITS = ['♠', '♥', '♦', '♣'];
+const SUIT_ICONS: PixelIconName[] = ['spade', 'heart', 'diamond', 'club'];
 
 export function FoundationPile({ cards, index, isDropTarget, drag, onStartDrag }: FoundationPileProps) {
 	const loc: PileLocation = { type: 'foundation', index };
@@ -34,7 +35,7 @@ export function FoundationPile({ cards, index, isDropTarget, drag, onStartDrag }
 				/>
 			) : (
 				<div class="empty-slot" data-pile-type="foundation" data-pile-index={index}>
-					<span class="placeholder">{SUITS[index]}</span>
+					<span class="placeholder"><PixelIcon name={SUIT_ICONS[index]} size={28} /></span>
 				</div>
 			)}
 		</div>
